@@ -6,15 +6,16 @@
         "description": "Log in with the same account you use on your school's Edookit portal (usually a Plus4U e-mail and password).",
         "data": {
           "school": "School",
-          "username": "E-mail / username",
-          "password": "Password",
+          "username": "E-mail / username / access code 1",
+          "password": "Password / access code 2",
           "login_method": "Login method",
           "oidc_client_id": "Plus4U OIDC client id (advanced)"
         },
         "data_description": {
           "school": "Subdomain or address of your school's portal, e.g. `zs-example` or `https://zs-example.edookit.net`.",
-          "login_method": "Automatic tries Plus4U and the classic Edookit login form.",
-          "oidc_client_id": "Leave empty. Only needed if automatic Plus4U discovery fails (see README)."
+          "login_method": "Automatic: e-mail → Plus4U password, anything else → Plus4U access codes; the classic Edookit form if the school has one.",
+          "oidc_client_id": "Leave empty. Only needed if automatic Plus4U discovery fails (see README).",
+          "username": "For “+4U Access” login enter access code 1 here and access code 2 as the password."
         }
       },
       "reauth_confirm": {
@@ -28,8 +29,8 @@
         "title": "Change Edookit account",
         "data": {
           "school": "School",
-          "username": "E-mail / username",
-          "password": "Password",
+          "username": "E-mail / username / access code 1",
+          "password": "Password / access code 2",
           "login_method": "Login method",
           "oidc_client_id": "Plus4U OIDC client id (advanced)"
         }
@@ -80,6 +81,7 @@
       "options": {
         "auto": "Automatic",
         "plus4u": "Plus4U (e-mail + password)",
+        "plus4u_codes": "Plus4U +4U Access (access code 1 + 2)",
         "edookit": "Classic Edookit login form"
       }
     },

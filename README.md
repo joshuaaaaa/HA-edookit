@@ -49,8 +49,8 @@ Zkopírujte složku `custom_components/edookit` do `/config/custom_components/` 
 | Pole | Popis |
 |---|---|
 | Škola | subdoména nebo adresa portálu, např. `zs-priklad` nebo `https://zs-priklad.edookit.net` |
-| E-mail / uživatelské jméno, heslo | stejné údaje jako pro přihlášení na portál |
-| Způsob přihlášení | *Automaticky* (doporučeno), *Plus4U* (e-mail + heslo) nebo *Klasický formulář Edookitu* (starší instalace) |
+| E-mail / uživatelské jméno, heslo | stejné údaje jako pro přihlášení na portál; u přihlášení **„+4U Access“** zadejte **přístupový kód 1** jako uživatele a **přístupový kód 2** jako heslo |
+| Způsob přihlášení | *Automaticky* (doporučeno – e-mail → heslo Plus4U, jinak přístupové kódy), *Plus4U (e-mail + heslo)*, *Plus4U +4U Access (přístupové kódy)* nebo *Klasický formulář Edookitu* (starší instalace) |
 | Plus4U OIDC client id | nechte prázdné, viz [Řešení problémů](#řešení-problémů) |
 
 Pro každé dítě s vlastním účtem přidejte integraci znovu.
@@ -159,6 +159,7 @@ Při prvním načtení se nic neohlašuje (aby nepřišlo 50 notifikací najedno
 
 * **Přihlášení**: rodiče a žáci se do Edookitu přihlašují přes **Plus4U** (OpenID Connect).
   Integrace si z přihlašovací stránky školy zjistí OIDC klienta, přihlásí se e-mailem a heslem
+  (nebo přístupovými kódy +4U Access)
   a uloží si cookies (v `.storage`), takže se nepřihlašuje znovu při každém restartu.
   Když session vyprší, přihlásí se znovu sama. Starší školy s vlastním formulářem Edookitu jsou podporované taky.
 * **Rozvrh** se čte ze stránky `/timetable/` (aktuální a další týdny), případně z iCal odkazu nebo REST API.
@@ -172,8 +173,11 @@ Při prvním načtení se nic neohlašuje (aby nepřišlo 50 notifikací najedno
 **Přihlášení selhává**
 * Zkuste se přihlásit na `https://<škola>.edookit.net` v prohlížeči. Pokud Plus4U chce reCAPTCHA
   nebo dvoufázové ověření, integrace to neumí – po přihlášení v prohlížeči to zkuste za chvíli znovu.
-* Přihlášení **přístupovými kódy** Plus4U (Access Code 1/2) ani přes Google/Microsoft účet podporované
-  není – nastavte si v Plus4U e-mail a heslo.
+* **Přístupové kódy (+4U Access)**: kódy se nejdřív ověří u Plus4U (`/oidc/grantToken`), takže špatné
+  kódy hlásí jasnou chybu. Samotné přihlášení do Edookitu pak jde přes `/authAccessCodes/authenticate`;
+  tenhle krok nebyl ověřen proti živému Plus4U – pokud selže, zapněte ladicí log a pošlete
+  řádky `Access code login via …` v issue. Účty s dvoufázovým ověřením ani přihlášení přes
+  Google/Microsoft podporované nejsou.
 * **OIDC client id**: pokud automatické zjištění selže, v prohlížeči otevřete
   vývojářské nástroje (F12) → Síť, přihlaste se a najděte požadavek na
   `uuidentity.plus4u.net/.../oidc/auth?...client_id=XXXXXXXX`. Hodnotu `client_id`

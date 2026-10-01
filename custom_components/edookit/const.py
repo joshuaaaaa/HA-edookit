@@ -13,8 +13,9 @@ CONF_LOGIN_METHOD: Final = "login_method"
 
 LOGIN_AUTO: Final = "auto"
 LOGIN_PLUS4U: Final = "plus4u"
+LOGIN_PLUS4U_CODES: Final = "plus4u_codes"
 LOGIN_EDOOKIT: Final = "edookit"
-LOGIN_METHODS: Final = [LOGIN_AUTO, LOGIN_PLUS4U, LOGIN_EDOOKIT]
+LOGIN_METHODS: Final = [LOGIN_AUTO, LOGIN_PLUS4U, LOGIN_PLUS4U_CODES, LOGIN_EDOOKIT]
 
 # Options
 CONF_TIMETABLE_TIME: Final = "timetable_update_time"

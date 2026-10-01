@@ -68,8 +68,10 @@ def test_normalize_school():
         normalize_school("not a school!")
 
 
-def make_plus4u_server(password: str = "secret") -> tuple[FakeSession, dict[str, Any]]:
-    state: dict[str, Any] = {"logged_in": False, "auth_body": None}
+def make_plus4u_server(
+    password: str = "secret", codes: tuple[str, str] = ("1234", "abcdefgh9"), codes_endpoint: bool = True
+) -> tuple[FakeSession, dict[str, Any]]:
+    state: dict[str, Any] = {"logged_in": False, "auth_body": None, "codes_posts": [], "grant": None}
 
     def handler(method: str, url: str, **kwargs: Any) -> tuple[int, dict[str, str], str]:
         parsed = urlparse(url)
@@ -93,9 +95,22 @@ def make_plus4u_server(password: str = "secret") -> tuple[FakeSession, dict[str,
                 return 302, {"Location": f"{BASE}/user/oidc-login-callback?code=abc&state=x"}, ""
             state["auth_qs"] = qs
             return 302, {"Location": f"{DEFAULT_OIDC_BASE}/login?state=ST1&clientId={qs['client_id'][0]}"}, ""
+        if url == f"{DEFAULT_OIDC_BASE}/oidc/grantToken":
+            state["grant"] = kwargs["data"]
+            if (kwargs["data"]["accessCode1"], kwargs["data"]["accessCode2"]) != codes:
+                return 401, {}, json.dumps({"uuAppErrorMap": {"uu-oidc-main/grantToken/identityNotAuthenticated": {}}})
+            return 200, {}, json.dumps({"id_token": "x.y.z"})
+        if url == f"{DEFAULT_OIDC_BASE}/authAccessCodes/authenticate":
+            if not codes_endpoint:
+                return 404, {}, ""
+            state["codes_posts"].append(kwargs["json"])
+            body = kwargs["json"]
+            if (body.get("accessCode1"), body.get("accessCode2")) != codes:
+                return 401, {}, "{}"
+            return 302, {"Location": f"{DEFAULT_OIDC_BASE}/oidc/auth?resume=1"}, ""
         if url == f"{DEFAULT_OIDC_BASE}/authPassword/authenticate":
             state["auth_body"] = kwargs["json"]
-            if kwargs["json"]["password"] != password:
+            if kwargs["json"]["password"] not in (password, codes[1]):
                 return 401, {}, json.dumps({"uuAppErrorMap": {"invalidCredentials": {}}})
             return 302, {"Location": f"{DEFAULT_OIDC_BASE}/oidc/auth?resume=1"}, ""
         return 404, {}, ""
@@ -178,3 +193,45 @@ async def test_session_renewal_on_expired_page():
     html = await client.async_get_page("/")
     assert "requires-action-container" in html
     assert state["logged_in"]
+
+
+async def test_access_codes_login():
+    session, state = make_plus4u_server()
+    # No "@" in the user name -> automatic mode uses the +4U Access codes.
+    client = EdookitClient(session, "skola", "1234", "abcdefgh9")
+    await client.async_login()
+    assert client.logged_in
+    assert client.used_login_method == "plus4u_codes"
+    assert state["grant"] == {
+        "grant_type": "password",
+        "accessCode1": "1234",
+        "accessCode2": "abcdefgh9",
+        "scope": "openid",
+    }
+    assert state["codes_posts"] == [
+        {
+            "clientId": "93b2c166a7aa436baa0278b8f5c736db",
+            "state": "ST1",
+            "rememberMe": True,
+            "accessCode1": "1234",
+            "accessCode2": "abcdefgh9",
+        }
+    ]
+    assert state["auth_body"] is None  # password endpoint not used
+
+
+async def test_access_codes_wrong():
+    session, state = make_plus4u_server()
+    client = EdookitClient(session, "skola", "1234", "wrong", login_method="plus4u_codes")
+    with pytest.raises(EdookitAuthError, match="access codes"):
+        await client.async_login()
+    # Rejected by the pre-check; no browser login attempts were made.
+    assert state["codes_posts"] == []
+
+
+async def test_access_codes_fall_back_to_password_endpoint():
+    session, state = make_plus4u_server(codes_endpoint=False)
+    client = EdookitClient(session, "skola", "1234", "abcdefgh9", login_method="plus4u_codes")
+    await client.async_login()
+    assert client.logged_in
+    assert state["auth_body"]["username"] == "1234"

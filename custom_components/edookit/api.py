@@ -11,6 +11,11 @@ Parents and students sign in through **Plus4U** (OpenID Connect,
 4. follow the redirects back to ``/user/oidc-login-callback``, which sets the
    portal session cookies.
 
+"+4U Access" accounts use two access codes instead of e-mail + password.
+They are first checked against the documented ``/oidc/grantToken``
+password grant (clear error for wrong codes / 2FA accounts) and then sent
+to ``/authAccessCodes/authenticate`` in the same browser flow.
+
 Older installations still offer Edookit's own login form
 (``loginForm``), which is supported as well.
 
@@ -49,6 +54,7 @@ PLUS4U_HOST = "uuidentity.plus4u.net"
 DEFAULT_OIDC_BASE = "https://uuidentity.plus4u.net/uu-oidc-maing02/bb977a99f4cc4c37a2afce3fd599d0a7"
 DEFAULT_OIDC_CLIENT_ID = "0fa24fa43e794de89003790253a93cb6"
 PASSWORD_REALM = "uuIdentityPasswordAuthNRealm"
+ACCESS_CODES_REALM = "uuIdentityAccessCodesAuthNRealm"
 
 _AUTH_URL_RE = re.compile(r"https://uuidentity\.plus4u\.net/[^\s\"'<>\\]+?/oidc/auth[^\s\"'<>\\]*")
 _OIDC_BASE_RE = re.compile(r"https://uuidentity\.plus4u\.net/uu-oidc-maing02/[0-9a-f]{32}")
@@ -176,7 +182,7 @@ class EdookitClient:
     # ----------------------------------------------------------------- login
 
     async def async_login(self) -> None:
-        """Log in using the configured method (``auto`` tries both)."""
+        """Log in using the configured method (``auto`` picks Plus4U or the Edookit form)."""
         async with self._login_lock:
             self.logged_in = False
             method = self._login_method
@@ -195,18 +201,20 @@ class EdookitClient:
 
             has_form = self._find_login_form(login_page.text) is not None
             order: list[str]
-            if method == "plus4u":
-                order = ["plus4u"]
-            elif method == "edookit":
-                order = ["edookit"]
+            if method in ("plus4u", "plus4u_codes", "edookit"):
+                order = [method]
             else:
-                order = ["edookit", "plus4u"] if has_form else ["plus4u", "edookit"]
+                # Plus4U passwords belong to e-mail accounts; anything else is an access code 1.
+                plus4u = "plus4u" if "@" in self._username else "plus4u_codes"
+                order = ["edookit", plus4u] if has_form else [plus4u, "edookit"]
 
             last_err: Exception | None = None
             for attempt in order:
                 try:
                     if attempt == "plus4u":
                         await self._login_plus4u(login_page)
+                    elif attempt == "plus4u_codes":
+                        await self._login_plus4u_codes(login_page)
                     else:
                         await self._login_form(login_page)
                     if await self._check_session():
@@ -283,9 +291,8 @@ class EdookitClient:
             else f"{self.base_url}/user/oidc-login-callback",
         )
 
-    async def _login_plus4u(self, login_page: Response) -> None:
-        cfg = await self._discover_oidc(login_page)
-        _LOGGER.debug("Plus4U OIDC: base=%s client=%s redirect=%s", cfg.base, cfg.client_id, cfg.redirect_uri)
+    async def _start_oidc(self, cfg: OidcConfig) -> tuple[str, str] | None:
+        """Begin the OIDC flow; return (state, clientId) or None if already signed in."""
         params = {
             "response_type": "code",
             "client_id": cfg.client_id,
@@ -300,7 +307,7 @@ class EdookitClient:
         if "code=" in location:
             # Plus4U session cookies are still valid; finish directly.
             await self._follow(location)
-            return
+            return None
         if "/login" not in location:
             raise EdookitAuthError(
                 f"Plus4U did not redirect to its login page (HTTP {resp.status}); the OIDC client id is probably wrong"
@@ -310,21 +317,10 @@ class EdookitClient:
         client_id = (qs.get("clientId") or qs.get("client_id") or [cfg.client_id])[0]
         if not state:
             raise EdookitAuthError("Plus4U login redirect has no state parameter")
+        return state, client_id
 
-        body = {
-            "clientId": client_id,
-            "state": state,
-            "rememberMe": True,
-            "realmCode": PASSWORD_REALM,
-            "username": self._username,
-            "password": self._password,
-        }
-        resp = await self._request(
-            "POST",
-            f"{cfg.base}/authPassword/authenticate",
-            json=body,
-            allow_redirects=False,
-        )
+    async def _post_credentials(self, url: str, body: dict[str, Any]) -> Response:
+        resp = await self._request("POST", url, json=body, allow_redirects=False)
         location = resp.headers.get("Location")
         if not location and resp.text.strip().startswith("{"):
             try:
@@ -332,12 +328,96 @@ class EdookitClient:
                 location = data.get("redirectUri") or data.get("location") or data.get("uri")
             except ValueError:
                 pass
-        if resp.status in (400, 401, 403) or not location:
-            hint = ""
-            if "captcha" in resp.text.lower():
-                hint = " (Plus4U requires a reCAPTCHA; log in once in a browser and retry later)"
-            raise EdookitAuthError(f"Plus4U rejected the credentials (HTTP {resp.status}){hint}")
-        await self._follow(urljoin(resp.url, location))
+        if location and resp.status < 400:
+            await self._follow(urljoin(resp.url, location))
+        return Response(resp.status, resp.url, resp.text, {**resp.headers, "Location": location or ""})
+
+    @staticmethod
+    def _rejected(resp: Response, what: str) -> EdookitAuthError:
+        hint = ""
+        if "captcha" in resp.text.lower():
+            hint = " (Plus4U requires a reCAPTCHA; log in once in a browser and retry later)"
+        return EdookitAuthError(f"Plus4U rejected the {what} (HTTP {resp.status}){hint}")
+
+    async def _login_plus4u(self, login_page: Response) -> None:
+        """Plus4U e-mail + password."""
+        cfg = await self._discover_oidc(login_page)
+        _LOGGER.debug("Plus4U OIDC: base=%s client=%s redirect=%s", cfg.base, cfg.client_id, cfg.redirect_uri)
+        started = await self._start_oidc(cfg)
+        if started is None:
+            return
+        state, client_id = started
+        resp = await self._post_credentials(
+            f"{cfg.base}/authPassword/authenticate",
+            {
+                "clientId": client_id,
+                "state": state,
+                "rememberMe": True,
+                "realmCode": PASSWORD_REALM,
+                "username": self._username,
+                "password": self._password,
+            },
+        )
+        if resp.status >= 400 or not resp.headers["Location"]:
+            raise self._rejected(resp, "credentials")
+
+    async def _check_access_codes(self, cfg: OidcConfig) -> None:
+        """Validate access codes with the documented token endpoint (clear errors, no session)."""
+        resp = await self._request(
+            "POST",
+            f"{cfg.base}/oidc/grantToken",
+            data={
+                "grant_type": "password",
+                "accessCode1": self._username,
+                "accessCode2": self._password,
+                "scope": "openid",
+            },
+        )
+        if resp.status == 200:
+            return
+        text = resp.text
+        if "unsupportedCredentials" in text or "notAuthenticated" in text or resp.status == 401:
+            raise EdookitAuthError(
+                "Plus4U rejected the access codes (wrong codes, or the account requires "
+                f"two-factor login which is not supported) (HTTP {resp.status})"
+            )
+        # Anything else (e.g. the endpoint changed): don't block, try the browser flow.
+        _LOGGER.debug("Access code pre-check returned HTTP %s: %s", resp.status, text[:300])
+
+    async def _login_plus4u_codes(self, login_page: Response) -> None:
+        """Plus4U "+4U Access" (access code 1 + access code 2)."""
+        cfg = await self._discover_oidc(login_page)
+        await self._check_access_codes(cfg)
+        codes = {"accessCode1": self._username, "accessCode2": self._password}
+        attempts = (
+            ("authAccessCodes/authenticate", codes),
+            ("authAccessCodes/authenticate", {"realmCode": ACCESS_CODES_REALM, **codes}),
+            (
+                "authPassword/authenticate",
+                {"realmCode": PASSWORD_REALM, "username": self._username, "password": self._password},
+            ),
+        )
+        last: Response | None = None
+        missing: set[str] = set()
+        for path, extra in attempts:
+            if path in missing:
+                continue
+            started = await self._start_oidc(cfg)
+            if started is None:
+                return
+            state, client_id = started
+            resp = await self._post_credentials(
+                f"{cfg.base}/{path}", {"clientId": client_id, "state": state, "rememberMe": True, **extra}
+            )
+            _LOGGER.debug("Access code login via %s: HTTP %s", path, resp.status)
+            if resp.status < 400 and resp.headers["Location"]:
+                return
+            if resp.status == 404:
+                missing.add(path)
+            last = resp
+        if last is None:
+            raise EdookitAuthError("Plus4U access code login failed")
+        raise self._rejected(last, "access codes")
 
     # Classic Edookit form ------------------------------------------------
 

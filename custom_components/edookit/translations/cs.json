@@ -6,15 +6,16 @@
         "description": "Přihlaste se stejným účtem, jakým se přihlašujete do Edookitu vaší školy (většinou e-mail a heslo Plus4U).",
         "data": {
           "school": "Škola",
-          "username": "E-mail / uživatelské jméno",
-          "password": "Heslo",
+          "username": "E-mail / uživatelské jméno / přístupový kód 1",
+          "password": "Heslo / přístupový kód 2",
           "login_method": "Způsob přihlášení",
           "oidc_client_id": "Plus4U OIDC client id (pokročilé)"
         },
         "data_description": {
           "school": "Subdoména nebo adresa portálu školy, např. `zs-priklad` nebo `https://zs-priklad.edookit.net`.",
-          "login_method": "Automaticky zkusí Plus4U i klasický přihlašovací formulář Edookitu.",
-          "oidc_client_id": "Nechte prázdné. Potřeba jen když selže automatické zjištění Plus4U (viz README)."
+          "login_method": "Automaticky: e-mail → heslo Plus4U, cokoli jiného → přístupové kódy Plus4U; klasický formulář Edookitu, pokud ho škola má.",
+          "oidc_client_id": "Nechte prázdné. Potřeba jen když selže automatické zjištění Plus4U (viz README).",
+          "username": "Pro přihlášení „+4U Access“ sem zadejte přístupový kód 1 a do hesla přístupový kód 2."
         }
       },
       "reauth_confirm": {
@@ -28,8 +29,8 @@
         "title": "Změnit účet Edookit",
         "data": {
           "school": "Škola",
-          "username": "E-mail / uživatelské jméno",
-          "password": "Heslo",
+          "username": "E-mail / uživatelské jméno / přístupový kód 1",
+          "password": "Heslo / přístupový kód 2",
           "login_method": "Způsob přihlášení",
           "oidc_client_id": "Plus4U OIDC client id (pokročilé)"
         }
@@ -80,6 +81,7 @@
       "options": {
         "auto": "Automaticky",
         "plus4u": "Plus4U (e-mail + heslo)",
+        "plus4u_codes": "Plus4U +4U Access (přístupový kód 1 + 2)",
         "edookit": "Klasický formulář Edookitu"
       }
     },
