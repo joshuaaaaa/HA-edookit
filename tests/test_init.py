@@ -283,3 +283,21 @@ async def test_two_children(hass: HomeAssistant, freezer: FrozenDateTimeFactory,
         await hass.async_block_till_done()
         assert len(events) == 1
         assert events[0].data["child_id"] in ("101", "102")
+
+
+async def test_stale_child_devices_removed(hass: HomeAssistant, freezer: FrozenDateTimeFactory, mock_client) -> None:
+    """Devices of children that are no longer detected disappear on reload."""
+    from homeassistant.helpers import device_registry as dr
+
+    entry = MockConfigEntry(domain=DOMAIN, data=ENTRY_DATA, title="Jan Novák")
+    entry.add_to_hass(hass)
+    registry = dr.async_get(hass)
+    stale = registry.async_get_or_create(
+        config_entry_id=entry.entry_id, identifiers={(DOMAIN, f"{entry.entry_id}_999")}, name="Edookit bogus"
+    )
+    await hass.config.async_set_time_zone("Europe/Prague")
+    freezer.move_to("2026-09-28 08:10:00+02:00")
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    assert registry.async_get(stale.id) is None
+    assert registry.async_get_device(identifiers={(DOMAIN, entry.entry_id)}) is not None

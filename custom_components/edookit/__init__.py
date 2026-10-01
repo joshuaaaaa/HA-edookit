@@ -14,7 +14,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_PASSWORD, CONF_USERNAME, Platform
 from homeassistant.core import HomeAssistant, ServiceCall, ServiceResponse, SupportsResponse, callback
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady, ServiceValidationError
-from homeassistant.helpers import config_validation as cv
+from homeassistant.helpers import config_validation as cv, device_registry as dr
 from homeassistant.helpers.aiohttp_client import async_create_clientsession
 from homeassistant.helpers.event import async_track_time_change
 from homeassistant.helpers.storage import Store
@@ -107,6 +107,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: EdookitConfigEntry) -> b
         children.append(ChildRuntime(child, timetable, data))
 
     entry.runtime_data = EdookitRuntimeData(client, store, stored, children)
+    _remove_stale_devices(hass, entry, children)
 
     when = parse_time_option(entry.options.get(CONF_TIMETABLE_TIME, DEFAULT_TIMETABLE_TIME))
 
@@ -125,6 +126,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: EdookitConfigEntry) -> b
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     return True
+
+
+def _remove_stale_devices(hass: HomeAssistant, entry: ConfigEntry, children: list[ChildRuntime]) -> None:
+    """Drop devices (and their entities) of students that are no longer found."""
+    valid = {(DOMAIN, f"{entry.entry_id}_{c.child.id}" if c.child.id else entry.entry_id) for c in children}
+    registry = dr.async_get(hass)
+    for device in dr.async_entries_for_config_entry(registry, entry.entry_id):
+        if not device.identifiers & valid:
+            _LOGGER.info("Removing stale Edookit device %s", device.name)
+            registry.async_update_device(device.id, remove_config_entry_id=entry.entry_id)
 
 
 async def _async_options_updated(hass: HomeAssistant, entry: ConfigEntry) -> None:

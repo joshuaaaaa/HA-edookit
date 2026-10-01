@@ -188,6 +188,9 @@ def parse_student_name(html: str | BeautifulSoup) -> str | None:
 
 _CHILD_PARAM_RE = re.compile(r"[?&]([\w-]*?(?:student|child|person|pupil|zak|dite|kid)[\w-]*?)=(\d+)", re.I)
 _SELECTED_CLASSES = {"selected", "active", "current", "checked"}
+# A person's name: 2-4 capitalised words ("Anna Hrubá", "Jan Petr Novák").
+_UPPER = "A-ZÁČĎÉĚÍŇÓŘŠŤÚŮÝŽ"
+_PERSON_NAME_RE = re.compile(rf"^[{_UPPER}][\w'’.-]*(?:\s+[{_UPPER}][\w'’.-]*){{1,3}}$")
 
 
 def parse_children(html: str | BeautifulSoup) -> list[dict[str, Any]]:
@@ -207,11 +210,18 @@ def parse_children(html: str | BeautifulSoup) -> list[dict[str, Any]]:
             raw = match.group(1)
         if not raw or "/detail" in raw or "termSelector" in raw:
             continue
-        found = _CHILD_PARAM_RE.search(raw.replace("&amp;", "&"))
+        raw = raw.replace("&amp;", "&")
+        found = _CHILD_PARAM_RE.search(raw)
         if not found:
             continue
-        name = clean(el.get("title") or "") or clean(el.get_text(" "))
-        if not name or len(name) > 80 or name.isdigit():
+        # Only state-switching links count (a Nette signal or a *Selector parameter);
+        # ordinary links such as "Přejít na hodnocení po předmětech?student=1" do not.
+        if "do=" not in raw and not re.search(r"selector|switch", found.group(1), re.I):
+            continue
+        name = display_name(clean(el.get_text(" "))) or ""
+        if not _PERSON_NAME_RE.match(name):
+            name = display_name(clean(el.get("title") or "")) or ""
+        if not _PERSON_NAME_RE.match(name):
             continue
         classes = set(el.get("class", []))
         if el.parent is not None:

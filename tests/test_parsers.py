@@ -150,11 +150,18 @@ def test_ical():
 
 
 def test_children_switcher():
-    html = """<div class="top"><a href="/?mainMenu-studentSelector-new=11&do=x" class="active">Anna</a>
-      <a href="/?mainMenu-studentSelector-new=12&do=x">Petr</a>
+    html = """<div class="top"><a href="/?mainMenu-studentSelector-new=11&do=x" class="active">Anna Hrubá</a>
+      <a href="/?mainMenu-studentSelector-new=12&do=x">Petr Hrubý</a>
       <a href="/evaluation/detail?student=11">detail link is ignored</a></div>"""
     children = parsers.parse_children(html)
-    assert [(c["id"], c["name"], c["selected"]) for c in children] == [("11", "Anna", True), ("12", "Petr", False)]
+    assert [(c["id"], c["name"], c["selected"]) for c in children] == [
+        ("11", "Anna Hrubá", True),
+        ("12", "Petr Hrubý", False),
+    ]
     assert children[1]["url"] == "/?mainMenu-studentSelector-new=12&do=x"
     assert parsers.parse_children(load("dashboard.html")) == []
+    # Per-child dashboard links are not a switcher (this created bogus "children" before).
+    links = """<a href="/evaluation/?student=11">Přejít na hodnocení po předmětech</a>
+      <a href="/evaluation/?student=12">Přejít na hodnocení po předmětech</a>"""
+    assert parsers.parse_children(links) == []
     assert parsers.display_name("Jakub Hrubý (Jarmila Šuláková, 9549-3740-1)") == "Jakub Hrubý"

@@ -17,6 +17,7 @@ const STRINGS = {
     noEntity: "Vyberte entitu rozvrhu Edookit",
     notFound: "Entita nenalezena",
     noData: "Rozvrh zatím není načten",
+    unavailable: "Entita není dostupná – zkontrolujte, že je integrace načtená a entita existuje.",
     free: "Volno 🎉",
     empty: "Rozvrh je prázdný. Integrace nenašla žádné hodiny – zkontrolujte senzor Poslední aktualizace (atribut errors) nebo zavolejte službu edookit.dump_pages.",
     period: ".",
@@ -35,6 +36,7 @@ const STRINGS = {
     noEntity: "Select an Edookit timetable entity",
     notFound: "Entity not found",
     noData: "Timetable not loaded yet",
+    unavailable: "Entity unavailable – check that the integration is loaded and the entity exists.",
     free: "No lessons 🎉",
     empty: "The timetable is empty. The integration found no lessons – check the Last update sensor (errors attribute) or call the edookit.dump_pages service.",
     period: ".",
@@ -334,6 +336,7 @@ class EdookitTimetableCard extends HTMLElement {
 
     if (!cfg.entity) body = `<div class="empty">${t.noEntity}</div>`;
     else if (!st) body = `<div class="empty">${t.notFound}: ${escapeHtml(cfg.entity)}</div>`;
+    else if (st.state === "unavailable") body = `<div class="empty">${t.unavailable}</div>`;
     else {
       const attrs = st.attributes || {};
       const days = attrs.days || [];
