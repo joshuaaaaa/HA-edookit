@@ -11,7 +11,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.event import async_track_time_change
 from homeassistant.util import dt as dt_util
 
-from .coordinator import EdookitConfigEntry
+from .coordinator import ChildRuntime, EdookitConfigEntry
 from .entity import EdookitEntity
 from .timeutil import lesson_end, lesson_start, lessons_on
 
@@ -21,20 +21,22 @@ async def async_setup_entry(
 ) -> None:
     """Set up binary sensors."""
     async_add_entities(
-        [
-            SchoolDayBinarySensor(entry, "school_today", 0),
-            SchoolDayBinarySensor(entry, "school_tomorrow", 1),
-            InLessonBinarySensor(entry),
-            UnreadBinarySensor(entry),
-        ]
+        entity
+        for child in entry.runtime_data.children
+        for entity in (
+            SchoolDayBinarySensor(entry, child, "school_today", 0),
+            SchoolDayBinarySensor(entry, child, "school_tomorrow", 1),
+            InLessonBinarySensor(entry, child),
+            UnreadBinarySensor(entry, child),
+        )
     )
 
 
 class _TimeBinary(EdookitEntity, BinarySensorEntity):
     """Timetable-based binary sensor re-evaluated every minute."""
 
-    def __init__(self, entry: EdookitConfigEntry, key: str) -> None:
-        super().__init__(entry, entry.runtime_data.timetable, key)
+    def __init__(self, entry: EdookitConfigEntry, child: ChildRuntime, key: str) -> None:
+        super().__init__(entry, child, child.timetable, key)
 
     @property
     def lessons(self) -> list[dict[str, Any]]:
@@ -54,8 +56,8 @@ class SchoolDayBinarySensor(_TimeBinary):
 
     _attr_icon = "mdi:bag-personal-outline"
 
-    def __init__(self, entry: EdookitConfigEntry, key: str, offset: int) -> None:
-        super().__init__(entry, key)
+    def __init__(self, entry: EdookitConfigEntry, child: ChildRuntime, key: str, offset: int) -> None:
+        super().__init__(entry, child, key)
         self._offset = offset
 
     @property
@@ -82,8 +84,8 @@ class InLessonBinarySensor(_TimeBinary):
 
     _attr_icon = "mdi:human-male-board"
 
-    def __init__(self, entry: EdookitConfigEntry) -> None:
-        super().__init__(entry, "in_lesson")
+    def __init__(self, entry: EdookitConfigEntry, child: ChildRuntime) -> None:
+        super().__init__(entry, child, "in_lesson")
 
     @property
     def is_on(self) -> bool:
@@ -100,8 +102,8 @@ class UnreadBinarySensor(EdookitEntity, BinarySensorEntity):
 
     _attr_icon = "mdi:email-alert-outline"
 
-    def __init__(self, entry: EdookitConfigEntry) -> None:
-        super().__init__(entry, entry.runtime_data.data, "has_unread")
+    def __init__(self, entry: EdookitConfigEntry, child: ChildRuntime) -> None:
+        super().__init__(entry, child, child.data, "has_unread")
 
     @property
     def is_on(self) -> bool:

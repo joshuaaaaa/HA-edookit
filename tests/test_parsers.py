@@ -147,3 +147,14 @@ def test_ical():
     assert lessons[0]["teacher"] == "Karel Dvořák"
     assert (lessons[1]["start"], lessons[1]["end"]) == ("08:55", "09:40")  # UTC -> Prague
     assert lessons[1]["cancelled"] is True
+
+
+def test_children_switcher():
+    html = """<div class="top"><a href="/?mainMenu-studentSelector-new=11&do=x" class="active">Anna</a>
+      <a href="/?mainMenu-studentSelector-new=12&do=x">Petr</a>
+      <a href="/evaluation/detail?student=11">detail link is ignored</a></div>"""
+    children = parsers.parse_children(html)
+    assert [(c["id"], c["name"], c["selected"]) for c in children] == [("11", "Anna", True), ("12", "Petr", False)]
+    assert children[1]["url"] == "/?mainMenu-studentSelector-new=12&do=x"
+    assert parsers.parse_children(load("dashboard.html")) == []
+    assert parsers.display_name("Jakub Hrubý (Jarmila Šuláková, 9549-3740-1)") == "Jakub Hrubý"

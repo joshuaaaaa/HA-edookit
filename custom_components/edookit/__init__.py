@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime, time
+import json
 import logging
 from pathlib import Path
 import re
@@ -12,7 +13,7 @@ import aiohttp
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_PASSWORD, CONF_USERNAME, Platform
 from homeassistant.core import HomeAssistant, ServiceCall, ServiceResponse, SupportsResponse, callback
-from homeassistant.exceptions import ServiceValidationError
+from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady, ServiceValidationError
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.aiohttp_client import async_create_clientsession
 from homeassistant.helpers.event import async_track_time_change
@@ -21,7 +22,7 @@ from homeassistant.helpers.typing import ConfigType
 from homeassistant.util import dt as dt_util
 import voluptuous as vol
 
-from .api import EdookitClient
+from .api import EdookitAuthError, EdookitClient, EdookitError
 from .const import (
     CONF_API_PASSWORD,
     CONF_API_USERNAME,
@@ -39,6 +40,7 @@ from .const import (
 )
 from .coordinator import (
     PAGES,
+    ChildRuntime,
     EdookitConfigEntry,
     EdookitDataCoordinator,
     EdookitRuntimeData,
@@ -87,23 +89,34 @@ async def async_setup_entry(hass: HomeAssistant, entry: EdookitConfigEntry) -> b
     stored: dict[str, Any] = await store.async_load() or {}
     client.import_cookies(stored.get("cookies"))
 
-    timetable = TimetableCoordinator(hass, entry, client, store, stored)
-    data = EdookitDataCoordinator(hass, entry, client, store, stored)
+    # A parent account can see several children (switcher at the top of the portal).
+    try:
+        found = await client.async_get_children()
+    except EdookitAuthError as err:
+        raise ConfigEntryAuthFailed(str(err)) from err
+    except EdookitError as err:
+        raise ConfigEntryNotReady(str(err)) from err
 
-    # Data first: it logs in and learns the student's name.
-    await data.async_config_entry_first_refresh()
-    await timetable.async_config_entry_first_refresh()
+    children: list[ChildRuntime] = []
+    for child in found:
+        data = EdookitDataCoordinator(hass, entry, client, store, stored, child)
+        timetable = TimetableCoordinator(hass, entry, client, store, stored, child)
+        # Data first: it learns the student's name.
+        await data.async_config_entry_first_refresh()
+        await timetable.async_config_entry_first_refresh()
+        children.append(ChildRuntime(child, timetable, data))
 
-    entry.runtime_data = EdookitRuntimeData(client, store, stored, timetable, data)
+    entry.runtime_data = EdookitRuntimeData(client, store, stored, children)
 
     when = parse_time_option(entry.options.get(CONF_TIMETABLE_TIME, DEFAULT_TIMETABLE_TIME))
 
     @callback
     def _daily_refresh(now: datetime) -> None:
         _LOGGER.debug("Scheduled daily Edookit refresh")
-        hass.async_create_task(timetable.async_request_refresh())
-        if data.update_interval is None:
-            hass.async_create_task(data.async_request_refresh())
+        for child in children:
+            hass.async_create_task(child.timetable.async_request_refresh())
+            if child.data.update_interval is None:
+                hass.async_create_task(child.data.async_request_refresh())
 
     entry.async_on_unload(
         async_track_time_change(hass, _daily_refresh, hour=when.hour, minute=when.minute, second=when.second)
@@ -147,29 +160,39 @@ def _register_services(hass: HomeAssistant) -> None:
     async def refresh(call: ServiceCall) -> None:
         what = call.data[ATTR_WHAT]
         for entry in _entries(hass, call):
-            if what in ("all", "timetable"):
-                await entry.runtime_data.timetable.async_refresh()
-            if what in ("all", "data"):
-                await entry.runtime_data.data.async_refresh()
+            for child in entry.runtime_data.children:
+                if what in ("all", "timetable"):
+                    await child.timetable.async_refresh()
+                if what in ("all", "data"):
+                    await child.data.async_refresh()
 
     async def dump_pages(call: ServiceCall) -> ServiceResponse:
         folder = Path(hass.config.path("edookit_debug"))
         written: list[str] = []
+
+        def _write(target: Path, text: str) -> None:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(text, encoding="utf-8")
+
         for entry in _entries(hass, call):
             client = entry.runtime_data.client
-            for key, path in {**PAGES, "timetable": "/timetable/"}.items():
-                try:
-                    html = await client.async_get_page(path)
-                except Exception as err:
-                    html = f"<!-- error: {err} -->"
-                target = folder / client.school / f"{key}.html"
-
-                def _write(target: Path = target, html: str = html) -> None:
-                    target.parent.mkdir(parents=True, exist_ok=True)
-                    target.write_text(html, encoding="utf-8")
-
-                await hass.async_add_executor_job(_write)
-                written.append(str(target))
+            base = folder / client.school
+            children = [rt.child for rt in entry.runtime_data.children]
+            await hass.async_add_executor_job(
+                _write,
+                base / "children.json",
+                json.dumps([c.__dict__ for c in children], ensure_ascii=False, indent=2),
+            )
+            for child in children:
+                async with client.as_child(child):
+                    for key, path in {**PAGES, "timetable": "/timetable/"}.items():
+                        try:
+                            html = await client.async_get_page(path)
+                        except Exception as err:
+                            html = f"<!-- error: {err} -->"
+                        target = base / (child.key or "default") / f"{key}.html"
+                        await hass.async_add_executor_job(_write, target, html)
+                        written.append(str(target))
         _LOGGER.warning(
             "Edookit pages saved to %s. They contain personal data - anonymise them before sharing",
             folder,
@@ -181,11 +204,18 @@ def _register_services(hass: HomeAssistant) -> None:
         end: date = call.data.get(ATTR_END) or start
         result = {}
         for entry in _entries(hass, call):
-            lessons = entry.runtime_data.timetable.data.get("lessons", [])
-            result[entry.entry_id] = {
-                "student": entry.runtime_data.data.student,
-                "lessons": [ls for ls in lessons if start.isoformat() <= ls["date"] <= end.isoformat()],
-            }
+            result[entry.entry_id] = [
+                {
+                    "student": child.name,
+                    "child_id": child.child.id,
+                    "lessons": [
+                        ls
+                        for ls in (child.timetable.data or {}).get("lessons", [])
+                        if start.isoformat() <= ls["date"] <= end.isoformat()
+                    ],
+                }
+                for child in entry.runtime_data.children
+            ]
         return result
 
     entry_schema = {vol.Optional(ATTR_ENTRY_ID): cv.string}

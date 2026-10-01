@@ -28,23 +28,31 @@ def _shape(value: Any) -> Any:
 async def async_get_config_entry_diagnostics(hass: HomeAssistant, entry: EdookitConfigEntry) -> dict[str, Any]:
     """Return diagnostics for a config entry."""
     runtime = entry.runtime_data
-    timetable = runtime.timetable.data or {}
-    data = runtime.data.data or {}
+    children = []
+    for child in runtime.children:
+        timetable = child.timetable.data or {}
+        data = child.data.data or {}
+        children.append(
+            {
+                "has_switcher": child.child.id is not None,
+                "timetable": {
+                    "source": timetable.get("source"),
+                    "updated": timetable.get("updated"),
+                    "lessons": len(timetable.get("lessons", [])),
+                    "bell": timetable.get("bell"),
+                    "sample": _shape(timetable.get("lessons", [])[:1]),
+                },
+                "data": {
+                    "errors": data.get("errors"),
+                    "sections": {k: _shape(v) for k, v in data.items() if k not in ("errors", "student")},
+                },
+            }
+        )
     return {
         "entry": {
             "data": async_redact_data(dict(entry.data), TO_REDACT),
             "options": async_redact_data(dict(entry.options), TO_REDACT),
         },
         "login_method": runtime.client.used_login_method,
-        "timetable": {
-            "source": timetable.get("source"),
-            "updated": timetable.get("updated"),
-            "lessons": len(timetable.get("lessons", [])),
-            "bell": timetable.get("bell"),
-            "sample": _shape(timetable.get("lessons", [])[:1]),
-        },
-        "data": {
-            "errors": data.get("errors"),
-            "sections": {k: _shape(v) for k, v in data.items() if k not in ("errors", "student")},
-        },
+        "children": children,
     }

@@ -7,7 +7,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .coordinator import EdookitConfigEntry
+from .coordinator import ChildRuntime, EdookitConfigEntry
 from .entity import EdookitEntity
 
 
@@ -15,7 +15,7 @@ async def async_setup_entry(
     hass: HomeAssistant, entry: EdookitConfigEntry, async_add_entities: AddEntitiesCallback
 ) -> None:
     """Set up the refresh button."""
-    async_add_entities([RefreshButton(entry)])
+    async_add_entities(RefreshButton(entry, child) for child in entry.runtime_data.children)
 
 
 class RefreshButton(EdookitEntity, ButtonEntity):
@@ -24,9 +24,9 @@ class RefreshButton(EdookitEntity, ButtonEntity):
     _attr_icon = "mdi:refresh"
     _attr_entity_category = EntityCategory.CONFIG
 
-    def __init__(self, entry: EdookitConfigEntry) -> None:
-        super().__init__(entry, entry.runtime_data.data, "refresh")
+    def __init__(self, entry: EdookitConfigEntry, child: ChildRuntime) -> None:
+        super().__init__(entry, child, child.data, "refresh")
 
     async def async_press(self) -> None:
-        await self.runtime.timetable.async_refresh()
-        await self.runtime.data.async_refresh()
+        await self.child.timetable.async_refresh()
+        await self.child.data.async_refresh()

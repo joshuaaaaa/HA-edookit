@@ -10,7 +10,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.util import dt as dt_util
 
-from .coordinator import EdookitConfigEntry
+from .coordinator import ChildRuntime, EdookitConfigEntry
 from .entity import EdookitEntity
 from .timeutil import lesson_end, lesson_start
 
@@ -19,7 +19,11 @@ async def async_setup_entry(
     hass: HomeAssistant, entry: EdookitConfigEntry, async_add_entities: AddEntitiesCallback
 ) -> None:
     """Set up calendars."""
-    async_add_entities([TimetableCalendar(entry), AgendaCalendar(entry)])
+    async_add_entities(
+        entity
+        for child in entry.runtime_data.children
+        for entity in (TimetableCalendar(entry, child), AgendaCalendar(entry, child))
+    )
 
 
 def _in_range(event: CalendarEvent, start: datetime, end: datetime) -> bool:
@@ -48,8 +52,8 @@ class TimetableCalendar(_BaseCalendar):
 
     _attr_icon = "mdi:timetable"
 
-    def __init__(self, entry: EdookitConfigEntry) -> None:
-        super().__init__(entry, entry.runtime_data.timetable, "timetable_calendar")
+    def __init__(self, entry: EdookitConfigEntry, child: ChildRuntime) -> None:
+        super().__init__(entry, child, child.timetable, "timetable_calendar")
 
     def _events(self) -> list[CalendarEvent]:
         events = []
@@ -116,8 +120,8 @@ class AgendaCalendar(_BaseCalendar):
 
     _attr_icon = "mdi:calendar-school"
 
-    def __init__(self, entry: EdookitConfigEntry) -> None:
-        super().__init__(entry, entry.runtime_data.data, "agenda_calendar")
+    def __init__(self, entry: EdookitConfigEntry, child: ChildRuntime) -> None:
+        super().__init__(entry, child, child.data, "agenda_calendar")
 
     def _events(self) -> list[CalendarEvent]:
         data = self.coordinator.data or {}

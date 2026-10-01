@@ -53,7 +53,11 @@ Zkopírujte složku `custom_components/edookit` do `/config/custom_components/` 
 | Způsob přihlášení | *Automaticky* (doporučeno – e-mail → heslo Plus4U, jinak přístupové kódy), *Plus4U (e-mail + heslo)*, *Plus4U +4U Access (přístupové kódy)* nebo *Klasický formulář Edookitu* (starší instalace) |
 | Plus4U OIDC client id | nechte prázdné, viz [Řešení problémů](#řešení-problémů) |
 
-Pro každé dítě s vlastním účtem přidejte integraci znovu.
+**Více dětí na jednom rodičovském účtu:** integrace najde přepínač dětí nahoře na portálu
+a pro **každé dítě vytvoří samostatné zařízení** se všemi entitami (rozvrh, známky, úkoly…),
+např. `sensor.edookit_anna_rozvrh` a `sensor.edookit_petr_rozvrh`. Na dashboard pak dejte
+jednu kartu rozvrhu pro každé dítě. Pokud má každé dítě vlastní účet, přidejte integraci
+pro každý účet zvlášť.
 
 ### Možnosti (Nastavit → Možnosti)
 
@@ -137,7 +141,7 @@ Při prvním načtení se nic neohlašuje (aby nepřišlo 50 notifikací najedno
 |---|---|
 | `edookit.refresh` | stáhne hned rozvrh (`what: timetable`), ostatní data (`what: data`) nebo vše |
 | `edookit.get_timetable` | vrátí hodiny pro období (`start_date`, `end_date`) – použitelné v automatizacích a skriptech (`response_variable`) |
-| `edookit.dump_pages` | uloží HTML všech stránek portálu do `/config/edookit_debug/` – pro opravu parseru. **Obsahuje osobní údaje, před sdílením je anonymizujte.** |
+| `edookit.dump_pages` | uloží HTML všech stránek portálu do `/config/edookit_debug/<škola>/<dítě>/` (a nalezené děti do `children.json`) – pro opravu parseru. **Obsahuje osobní údaje, před sdílením je anonymizujte.** |
 
 ## Jak to funguje
 

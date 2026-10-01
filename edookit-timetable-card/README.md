@@ -32,7 +32,7 @@ entity: sensor.edookit_jan_novak_rozvrh
 |---|---|---|
 | `entity` | – | senzor **Rozvrh** z integrace Edookit (povinné) |
 | `title` | jméno žáka | nadpis (`""` = bez nadpisu) |
-| `view` | `auto` | `week` = týdenní mřížka (dny × hodiny), `day` = seznam na jeden den, `auto` = podle šířky karty |
+| `view` | `week` | `week` = týdenní mřížka (dny × hodiny; v úzkém sloupci se dá posouvat do strany), `day` = seznam na jeden den, `auto` = pod 400 px šířky seznam, jinak týden |
 | `show_room` | `true` | učebna |
 | `show_teacher` | `false` | vyučující |
 | `show_times` | `true` | časy hodin |

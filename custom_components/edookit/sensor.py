@@ -13,7 +13,7 @@ from homeassistant.helpers.event import async_track_time_change
 from homeassistant.util import dt as dt_util
 
 from .const import CONF_PUBLIC_API, DEFAULT_PUBLIC_API
-from .coordinator import EdookitConfigEntry
+from .coordinator import ChildRuntime, EdookitConfigEntry
 from .entity import EdookitEntity
 from .timeutil import compact, lesson_end, lesson_start, lessons_on, next_school_day
 
@@ -24,30 +24,32 @@ async def async_setup_entry(
     hass: HomeAssistant, entry: EdookitConfigEntry, async_add_entities: AddEntitiesCallback
 ) -> None:
     """Set up sensors."""
-    entities: list[SensorEntity] = [
-        TimetableSensor(entry),
-        LessonsTomorrowSensor(entry),
-        CurrentLessonSensor(entry),
-        NextLessonSensor(entry),
-        SchoolStartSensor(entry, "school_start_today", tomorrow=False),
-        SchoolEndSensor(entry),
-        SchoolStartSensor(entry, "school_start_next", tomorrow=True),
-        TimetableChangesSensor(entry),
-        UnreadSensor(entry),
-        MessagesSensor(entry),
-        LastGradeSensor(entry),
-        GradeAverageSensor(entry),
-        HomeworkSensor(entry),
-        ExamsSensor(entry),
-        EventsSensor(entry),
-        ActionRequiredSensor(entry),
-        AbsencesSensor(entry),
-        PaymentsSensor(entry),
-        LastUpdateSensor(entry),
-    ]
-    if entry.options.get(CONF_PUBLIC_API, DEFAULT_PUBLIC_API):
-        entities.append(PublicEventsSensor(entry))
-        entities.append(SubstitutionsSensor(entry))
+    entities: list[SensorEntity] = []
+    for child in entry.runtime_data.children:
+        entities += [
+            TimetableSensor(entry, child),
+            LessonsTomorrowSensor(entry, child),
+            CurrentLessonSensor(entry, child),
+            NextLessonSensor(entry, child),
+            SchoolStartSensor(entry, child, "school_start_today", tomorrow=False),
+            SchoolEndSensor(entry, child),
+            SchoolStartSensor(entry, child, "school_start_next", tomorrow=True),
+            TimetableChangesSensor(entry, child),
+            UnreadSensor(entry, child),
+            MessagesSensor(entry, child),
+            LastGradeSensor(entry, child),
+            GradeAverageSensor(entry, child),
+            HomeworkSensor(entry, child),
+            ExamsSensor(entry, child),
+            EventsSensor(entry, child),
+            ActionRequiredSensor(entry, child),
+            AbsencesSensor(entry, child),
+            PaymentsSensor(entry, child),
+            LastUpdateSensor(entry, child),
+        ]
+        if entry.options.get(CONF_PUBLIC_API, DEFAULT_PUBLIC_API):
+            entities.append(PublicEventsSensor(entry, child))
+            entities.append(SubstitutionsSensor(entry, child))
     async_add_entities(entities)
 
 
@@ -59,8 +61,8 @@ class _TimetableBase(EdookitEntity, SensorEntity):
 
     _per_minute = False
 
-    def __init__(self, entry: EdookitConfigEntry, key: str) -> None:
-        super().__init__(entry, entry.runtime_data.timetable, key)
+    def __init__(self, entry: EdookitConfigEntry, child: ChildRuntime, key: str) -> None:
+        super().__init__(entry, child, child.timetable, key)
 
     @property
     def lessons(self) -> list[dict[str, Any]]:
@@ -86,8 +88,8 @@ class TimetableSensor(_TimetableBase):
     _attr_native_unit_of_measurement = "hodin"
     _unrecorded_attributes = frozenset({"days", "bell", "today"})
 
-    def __init__(self, entry: EdookitConfigEntry) -> None:
-        super().__init__(entry, "timetable")
+    def __init__(self, entry: EdookitConfigEntry, child: ChildRuntime) -> None:
+        super().__init__(entry, child, "timetable")
 
     @property
     def native_value(self) -> int:
@@ -97,7 +99,7 @@ class TimetableSensor(_TimetableBase):
     def extra_state_attributes(self) -> dict[str, Any]:
         data = self.coordinator.data or {}
         return {
-            "student": self.runtime.data.student,
+            "student": self.child.name,
             "source": data.get("source"),
             "week_start": data.get("week_start"),
             "last_update": data.get("updated"),
@@ -113,8 +115,8 @@ class LessonsTomorrowSensor(_TimetableBase):
     _attr_icon = "mdi:calendar-arrow-right"
     _attr_native_unit_of_measurement = "hodin"
 
-    def __init__(self, entry: EdookitConfigEntry) -> None:
-        super().__init__(entry, "lessons_tomorrow")
+    def __init__(self, entry: EdookitConfigEntry, child: ChildRuntime) -> None:
+        super().__init__(entry, child, "lessons_tomorrow")
 
     @property
     def native_value(self) -> int:
@@ -138,8 +140,8 @@ class CurrentLessonSensor(_TimetableBase):
     _attr_icon = "mdi:school"
     _per_minute = True
 
-    def __init__(self, entry: EdookitConfigEntry) -> None:
-        super().__init__(entry, "current_lesson")
+    def __init__(self, entry: EdookitConfigEntry, child: ChildRuntime) -> None:
+        super().__init__(entry, child, "current_lesson")
 
     def _current(self) -> dict[str, Any] | None:
         now = dt_util.now()
@@ -172,8 +174,8 @@ class NextLessonSensor(_TimetableBase):
     _attr_icon = "mdi:school-outline"
     _per_minute = True
 
-    def __init__(self, entry: EdookitConfigEntry) -> None:
-        super().__init__(entry, "next_lesson")
+    def __init__(self, entry: EdookitConfigEntry, child: ChildRuntime) -> None:
+        super().__init__(entry, child, "next_lesson")
 
     def _next(self) -> dict[str, Any] | None:
         now = dt_util.now()
@@ -209,8 +211,8 @@ class SchoolStartSensor(_TimetableBase):
     _attr_device_class = SensorDeviceClass.TIMESTAMP
     _attr_icon = "mdi:alarm"
 
-    def __init__(self, entry: EdookitConfigEntry, key: str, tomorrow: bool) -> None:
-        super().__init__(entry, key)
+    def __init__(self, entry: EdookitConfigEntry, child: ChildRuntime, key: str, tomorrow: bool) -> None:
+        super().__init__(entry, child, key)
         self._tomorrow = tomorrow
 
     @property
@@ -229,8 +231,8 @@ class SchoolEndSensor(_TimetableBase):
     _attr_device_class = SensorDeviceClass.TIMESTAMP
     _attr_icon = "mdi:home-import-outline"
 
-    def __init__(self, entry: EdookitConfigEntry) -> None:
-        super().__init__(entry, "school_end_today")
+    def __init__(self, entry: EdookitConfigEntry, child: ChildRuntime) -> None:
+        super().__init__(entry, child, "school_end_today")
 
     @property
     def native_value(self) -> datetime | None:
@@ -243,8 +245,8 @@ class TimetableChangesSensor(_TimetableBase):
 
     _attr_icon = "mdi:calendar-alert"
 
-    def __init__(self, entry: EdookitConfigEntry) -> None:
-        super().__init__(entry, "timetable_changes")
+    def __init__(self, entry: EdookitConfigEntry, child: ChildRuntime) -> None:
+        super().__init__(entry, child, "timetable_changes")
 
     def _changes(self) -> list[dict[str, Any]]:
         today = dt_util.now().date().isoformat()
@@ -265,8 +267,8 @@ class TimetableChangesSensor(_TimetableBase):
 class _DataBase(EdookitEntity, SensorEntity):
     """Sensor based on the data coordinator."""
 
-    def __init__(self, entry: EdookitConfigEntry, key: str) -> None:
-        super().__init__(entry, entry.runtime_data.data, key)
+    def __init__(self, entry: EdookitConfigEntry, child: ChildRuntime, key: str) -> None:
+        super().__init__(entry, child, child.data, key)
 
     @property
     def data(self) -> dict[str, Any]:
@@ -284,8 +286,8 @@ class UnreadSensor(_DataBase):
     _attr_icon = "mdi:bell-badge-outline"
     _attr_state_class = SensorStateClass.MEASUREMENT
 
-    def __init__(self, entry: EdookitConfigEntry) -> None:
-        super().__init__(entry, "unread")
+    def __init__(self, entry: EdookitConfigEntry, child: ChildRuntime) -> None:
+        super().__init__(entry, child, "unread")
 
     @property
     def native_value(self) -> int:
@@ -308,8 +310,8 @@ class MessagesSensor(_DataBase):
 
     _attr_icon = "mdi:email-outline"
 
-    def __init__(self, entry: EdookitConfigEntry) -> None:
-        super().__init__(entry, "last_message")
+    def __init__(self, entry: EdookitConfigEntry, child: ChildRuntime) -> None:
+        super().__init__(entry, child, "last_message")
 
     @property
     def native_value(self) -> str | None:
@@ -339,8 +341,8 @@ class LastGradeSensor(_DataBase):
 
     _attr_icon = "mdi:numeric-1-box-multiple-outline"
 
-    def __init__(self, entry: EdookitConfigEntry) -> None:
-        super().__init__(entry, "last_grade")
+    def __init__(self, entry: EdookitConfigEntry, child: ChildRuntime) -> None:
+        super().__init__(entry, child, "last_grade")
 
     @property
     def native_value(self) -> str | None:
@@ -369,8 +371,8 @@ class GradeAverageSensor(_DataBase):
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_suggested_display_precision = 2
 
-    def __init__(self, entry: EdookitConfigEntry) -> None:
-        super().__init__(entry, "grade_average")
+    def __init__(self, entry: EdookitConfigEntry, child: ChildRuntime) -> None:
+        super().__init__(entry, child, "grade_average")
 
     @property
     def native_value(self) -> float | None:
@@ -413,8 +415,8 @@ class HomeworkSensor(_ListSensor):
     _list_key = "assignments"
     _fields = ("title", "subject", "due", "description", "teacher")
 
-    def __init__(self, entry: EdookitConfigEntry) -> None:
-        super().__init__(entry, "homework")
+    def __init__(self, entry: EdookitConfigEntry, child: ChildRuntime) -> None:
+        super().__init__(entry, child, "homework")
 
 
 class ExamsSensor(_ListSensor):
@@ -424,8 +426,8 @@ class ExamsSensor(_ListSensor):
     _list_key = "exams"
     _fields = ("title", "subject", "date", "description")
 
-    def __init__(self, entry: EdookitConfigEntry) -> None:
-        super().__init__(entry, "exams")
+    def __init__(self, entry: EdookitConfigEntry, child: ChildRuntime) -> None:
+        super().__init__(entry, child, "exams")
 
 
 class EventsSensor(_ListSensor):
@@ -435,8 +437,8 @@ class EventsSensor(_ListSensor):
     _list_key = "events"
     _fields = ("title", "start", "end", "start_time", "end_time", "description", "creator")
 
-    def __init__(self, entry: EdookitConfigEntry) -> None:
-        super().__init__(entry, "events")
+    def __init__(self, entry: EdookitConfigEntry, child: ChildRuntime) -> None:
+        super().__init__(entry, child, "events")
 
 
 class ActionRequiredSensor(_ListSensor):
@@ -446,8 +448,8 @@ class ActionRequiredSensor(_ListSensor):
     _list_key = "action_items"
     _fields = ("name", "info", "kind")
 
-    def __init__(self, entry: EdookitConfigEntry) -> None:
-        super().__init__(entry, "action_required")
+    def __init__(self, entry: EdookitConfigEntry, child: ChildRuntime) -> None:
+        super().__init__(entry, child, "action_required")
 
 
 class PublicEventsSensor(_ListSensor):
@@ -457,8 +459,8 @@ class PublicEventsSensor(_ListSensor):
     _list_key = "public_events"
     _fields = ("title", "start", "end", "location", "description")
 
-    def __init__(self, entry: EdookitConfigEntry) -> None:
-        super().__init__(entry, "public_events")
+    def __init__(self, entry: EdookitConfigEntry, child: ChildRuntime) -> None:
+        super().__init__(entry, child, "public_events")
 
 
 class SubstitutionsSensor(_DataBase):
@@ -467,8 +469,8 @@ class SubstitutionsSensor(_DataBase):
     _attr_icon = "mdi:account-switch-outline"
     _unrecorded_attributes = frozenset({"data"})
 
-    def __init__(self, entry: EdookitConfigEntry) -> None:
-        super().__init__(entry, "substitutions")
+    def __init__(self, entry: EdookitConfigEntry, child: ChildRuntime) -> None:
+        super().__init__(entry, child, "substitutions")
 
     @property
     def native_value(self) -> int | None:
@@ -488,8 +490,8 @@ class AbsencesSensor(_DataBase):
     _attr_icon = "mdi:account-off-outline"
     _attr_state_class = SensorStateClass.MEASUREMENT
 
-    def __init__(self, entry: EdookitConfigEntry) -> None:
-        super().__init__(entry, "absences")
+    def __init__(self, entry: EdookitConfigEntry, child: ChildRuntime) -> None:
+        super().__init__(entry, child, "absences")
 
     @property
     def native_value(self) -> int:
@@ -515,8 +517,8 @@ class PaymentsSensor(_DataBase):
     _attr_device_class = SensorDeviceClass.MONETARY
     _attr_native_unit_of_measurement = "CZK"
 
-    def __init__(self, entry: EdookitConfigEntry) -> None:
-        super().__init__(entry, "payments_due")
+    def __init__(self, entry: EdookitConfigEntry, child: ChildRuntime) -> None:
+        super().__init__(entry, child, "payments_due")
 
     @property
     def native_value(self) -> float:
@@ -540,8 +542,8 @@ class LastUpdateSensor(_DataBase):
     _attr_device_class = SensorDeviceClass.TIMESTAMP
     _attr_entity_category = EntityCategory.DIAGNOSTIC
 
-    def __init__(self, entry: EdookitConfigEntry) -> None:
-        super().__init__(entry, "last_update")
+    def __init__(self, entry: EdookitConfigEntry, child: ChildRuntime) -> None:
+        super().__init__(entry, child, "last_update")
 
     @property
     def native_value(self) -> datetime | None:
@@ -550,11 +552,13 @@ class LastUpdateSensor(_DataBase):
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
-        timetable = self.runtime.timetable.data or {}
+        timetable = self.child.timetable.data or {}
         return {
             "timetable_updated": timetable.get("updated"),
             "timetable_source": timetable.get("source"),
             "login_method": self.runtime.client.used_login_method,
+            "child_id": self.child.child.id,
+            "children": [c.name for c in self.runtime.children],
             "school_year": self.data.get("school_year"),
             "errors": self.data.get("errors", {}),
         }

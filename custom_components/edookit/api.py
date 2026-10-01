@@ -26,6 +26,7 @@ Some schools also issue REST API credentials (HTTP Basic,
 from __future__ import annotations
 
 import asyncio
+from collections.abc import AsyncIterator
 import contextlib
 from dataclasses import dataclass
 from datetime import date
@@ -41,7 +42,7 @@ import aiohttp
 from bs4 import BeautifulSoup
 from yarl import URL
 
-from .parsers import is_login_page
+from .parsers import is_login_page, parse_children
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -103,6 +104,24 @@ class Response:
     headers: dict[str, str]
 
 
+@dataclass(frozen=True)
+class Child:
+    """A student whose data the account can see.
+
+    ``id`` is None for accounts without a child switcher (one student); then no
+    switching happens and entity ids stay the same as before multi-child support.
+    """
+
+    id: str | None
+    name: str | None = None
+    url: str | None = None
+
+    @property
+    def key(self) -> str:
+        """Suffix used in unique ids ('' for the single/default child)."""
+        return self.id or ""
+
+
 @dataclass
 class OidcConfig:
     """Plus4U OIDC parameters for one school."""
@@ -137,6 +156,9 @@ class EdookitClient:
         self._oidc_client_id = oidc_client_id or None
         self._api_auth = aiohttp.BasicAuth(api_username, api_password or "") if api_username else None
         self._login_lock = asyncio.Lock()
+        self._child_lock = asyncio.Lock()
+        self._selected_child: str | None = None
+        self._active_child: Child | None = None
         self.logged_in = False
         self.used_login_method: str | None = None
 
@@ -185,6 +207,7 @@ class EdookitClient:
         """Log in using the configured method (``auto`` picks Plus4U or the Edookit form)."""
         async with self._login_lock:
             self.logged_in = False
+            self._selected_child = None  # a new session starts with the portal's default child
             method = self._login_method
             login_page = await self._request("GET", f"{self.base_url}/user/login")
             if login_page.status >= 500:
@@ -478,12 +501,47 @@ class EdookitClient:
         if is_login_page(resp.text, resp.url):
             _LOGGER.debug("Edookit session expired, logging in again")
             await self.async_login()
+            if self._active_child is not None:
+                await self._select_child(self._active_child)
             resp = await self._request("GET", url)
             if is_login_page(resp.text, resp.url):
                 raise EdookitAuthError("Still redirected to login after re-authentication")
         if resp.status >= 400:
             raise EdookitConnectionError(f"GET {path}: HTTP {resp.status}")
         return resp.text
+
+    # -------------------------------------------------------------- children
+
+    async def async_get_children(self) -> list[Child]:
+        """Children from the portal's switcher; ``[Child(None)]`` when there is none."""
+        found = parse_children(await self.async_get_page("/"))
+        if not found:
+            return [Child(None)]
+        _LOGGER.debug("Edookit children found: %s", [(c["id"], c["name"]) for c in found])
+        return [Child(c["id"], c["name"], c["url"]) for c in found]
+
+    async def _select_child(self, child: Child) -> None:
+        if not child.url:
+            return
+        html = await self.async_get_page(child.url)
+        selected = [c for c in parse_children(html) if c["selected"]]
+        if selected and selected[0]["id"] != child.id:
+            _LOGGER.warning("Edookit did not switch to child %s (%s)", child.name, child.id)
+        self._selected_child = child.id
+
+    @contextlib.asynccontextmanager
+    async def as_child(self, child: Child) -> AsyncIterator[None]:
+        """Run portal requests with ``child`` selected (one child at a time)."""
+        async with self._child_lock:
+            if not self.logged_in:
+                await self.async_login()
+            if child.url and self._selected_child != child.id:
+                await self._select_child(child)
+            self._active_child = child if child.url else None
+            try:
+                yield
+            finally:
+                self._active_child = None
 
     def _csrf(self) -> str:
         cookies = self._session.cookie_jar.filter_cookies(URL(self.base_url))

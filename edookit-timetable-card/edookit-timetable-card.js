@@ -18,6 +18,7 @@ const STRINGS = {
     notFound: "Entita nenalezena",
     noData: "Rozvrh zatím není načten",
     free: "Volno 🎉",
+    empty: "Rozvrh je prázdný. Integrace nenašla žádné hodiny – zkontrolujte senzor Poslední aktualizace (atribut errors) nebo zavolejte službu edookit.dump_pages.",
     period: ".",
     updated: "Aktualizováno",
     cancelled: "zrušeno",
@@ -35,6 +36,7 @@ const STRINGS = {
     notFound: "Entity not found",
     noData: "Timetable not loaded yet",
     free: "No lessons 🎉",
+    empty: "The timetable is empty. The integration found no lessons – check the Last update sensor (errors attribute) or call the edookit.dump_pages service.",
     period: ".",
     updated: "Updated",
     cancelled: "cancelled",
@@ -50,7 +52,7 @@ const STRINGS = {
 };
 
 const DEFAULTS = {
-  view: "auto", // auto | week | day
+  view: "week", // week | day | auto (auto = day list when the card is narrower than 400 px)
   show_room: true,
   show_teacher: false,
   show_times: true,
@@ -155,9 +157,9 @@ class EdookitTimetableCard extends HTMLElement {
   }
 
   _effectiveView() {
-    const view = this._config?.view || "auto";
+    const view = this._config?.view || "week";
     if (view !== "auto") return view;
-    return (this._width || this.clientWidth || 800) >= 560 ? "week" : "day";
+    return (this._width || this.clientWidth || 800) >= 400 ? "week" : "day";
   }
 
   _weeks(days) {
@@ -277,7 +279,7 @@ class EdookitTimetableCard extends HTMLElement {
       .map(
         (p) => `<div class="ph">
           <div class="pn">${p.period}${t.period}</div>
-          ${this._config.show_times && p.start ? `<div class="pt">${p.start}${p.end ? "–" + p.end : ""}</div>` : ""}
+          ${this._config.show_times && p.start ? `<div class="pt">${p.start}${p.end && !compact ? "–" + p.end : ""}</div>` : ""}
         </div>`
       )
       .join("");
@@ -296,9 +298,10 @@ class EdookitTimetableCard extends HTMLElement {
           </div>${cells}`;
       })
       .join("");
-    return `<div class="grid" style="grid-template-columns: 52px repeat(${periods.length}, minmax(0, 1fr));">
+    // Each period column needs ~40 px; narrower cards scroll horizontally instead of hiding the week.
+    return `<div class="scroll"><div class="grid" style="grid-template-columns: 44px repeat(${periods.length}, minmax(40px, 1fr)); min-width: ${44 + periods.length * 44}px;">
         <div class="corner"></div>${head}${rows}
-      </div>`;
+      </div></div>`;
   }
 
   _dayHtml(day) {
@@ -334,8 +337,10 @@ class EdookitTimetableCard extends HTMLElement {
     else {
       const attrs = st.attributes || {};
       const days = attrs.days || [];
-      if (cfg.title === undefined) title = attrs.student ? `${attrs.student}` : attrs.friendly_name || "Rozvrh";
+      if (cfg.title === undefined) title = attrs.student ? `${attrs.student}`.replace(/\s*\(.*\)\s*$/, "") : attrs.friendly_name || "Rozvrh";
+      const total = days.reduce((n, d) => n + (d.lessons || []).length, 0);
       if (!days.length) body = `<div class="empty">${t.noData}</div>`;
+      else if (!total) body = `<div class="empty">${t.empty}</div>`;
       else if (this._effectiveView() === "week") {
         const weeks = this._weeks(days);
         const auto = this._autoWeekIndex(weeks, attrs);
@@ -440,6 +445,7 @@ class EdookitTimetableCard extends HTMLElement {
       .nav button:disabled { opacity: 0.3; cursor: default; }
       .content { padding: 8px 12px 12px; }
       .empty { padding: 24px 8px; text-align: center; color: var(--secondary-text-color); }
+      .scroll { overflow-x: auto; }
       .grid { display: grid; gap: 4px; }
       .corner { }
       .ph { text-align: center; padding: 2px 0 4px; border-bottom: 1px solid var(--divider-color); }

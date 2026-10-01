@@ -15,7 +15,7 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 from homeassistant.util import dt as dt_util
 
 from . import parsers
-from .api import EdookitAuthError, EdookitClient, EdookitConnectionError, EdookitError
+from .api import Child, EdookitAuthError, EdookitClient, EdookitConnectionError, EdookitError
 from .const import (
     CONF_API_STUDENT_ID,
     CONF_FIRE_EVENTS,
@@ -46,14 +46,27 @@ SEEN_RETENTION = timedelta(days=120)
 
 
 @dataclass
+class ChildRuntime:
+    """Coordinators of one student."""
+
+    child: Child
+    timetable: TimetableCoordinator
+    data: EdookitDataCoordinator
+
+    @property
+    def name(self) -> str | None:
+        """Student name for device / entity naming."""
+        return parsers.display_name(self.child.name or self.data.student)
+
+
+@dataclass
 class EdookitRuntimeData:
     """Objects shared by the platforms of one config entry."""
 
     client: EdookitClient
     store: Store
     stored: dict[str, Any]
-    timetable: TimetableCoordinator
-    data: EdookitDataCoordinator
+    children: list[ChildRuntime]
 
 
 type EdookitConfigEntry = ConfigEntry[EdookitRuntimeData]
@@ -65,6 +78,17 @@ def _opt(entry: ConfigEntry, key: str, default: Any = None) -> Any:
 
 def _week_start(day: date) -> date:
     return day - timedelta(days=day.weekday())
+
+
+async def _as_child(client: EdookitClient, child: Child, fetch: Any) -> dict[str, Any]:
+    """Run ``fetch()`` with the child selected in the portal session."""
+    try:
+        async with client.as_child(child):
+            return await fetch()
+    except EdookitAuthError as err:
+        raise ConfigEntryAuthFailed(str(err)) from err
+    except EdookitError as err:
+        raise UpdateFailed(str(err)) from err
 
 
 async def _save(store: Store, stored: dict[str, Any], client: EdookitClient) -> None:
@@ -79,20 +103,30 @@ class TimetableCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     """Timetable, refreshed once a day at the configured time (and on demand)."""
 
     def __init__(
-        self, hass: HomeAssistant, entry: ConfigEntry, client: EdookitClient, store: Store, stored: dict
+        self,
+        hass: HomeAssistant,
+        entry: ConfigEntry,
+        client: EdookitClient,
+        store: Store,
+        stored: dict,
+        child: Child,
     ) -> None:
         super().__init__(
             hass,
             _LOGGER,
             config_entry=entry,
-            name=f"{DOMAIN} timetable {client.school}",
+            name=f"{DOMAIN} timetable {client.school} {child.key}".strip(),
             update_interval=None,
         )
         self.client = client
+        self.child = child
         self._store = store
         self._stored = stored
 
     async def _async_update_data(self) -> dict[str, Any]:
+        return await _as_child(self.client, self.child, self._fetch)
+
+    async def _fetch(self) -> dict[str, Any]:
         entry = self.config_entry
         weeks = int(_opt(entry, CONF_WEEKS, DEFAULT_WEEKS))
         today = dt_util.now().date()
@@ -106,7 +140,10 @@ class TimetableCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         ical_url = _opt(entry, CONF_ICAL_URL)
         student_id = _opt(entry, CONF_API_STUDENT_ID)
         if source == SOURCE_AUTO:
-            if self.client.has_api and student_id:
+            if self.child.id is not None:
+                # iCal / API options describe one student; with a child switcher use the portal.
+                source = SOURCE_PORTAL
+            elif self.client.has_api and student_id:
                 source = SOURCE_API
             elif ical_url:
                 source = SOURCE_ICAL
@@ -293,21 +330,28 @@ class EdookitDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     """Inbox, grades, homework, exams, events, attendance, payments."""
 
     def __init__(
-        self, hass: HomeAssistant, entry: ConfigEntry, client: EdookitClient, store: Store, stored: dict
+        self,
+        hass: HomeAssistant,
+        entry: ConfigEntry,
+        client: EdookitClient,
+        store: Store,
+        stored: dict,
+        child: Child,
     ) -> None:
         minutes = int(_opt(entry, CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL))
         super().__init__(
             hass,
             _LOGGER,
             config_entry=entry,
-            name=f"{DOMAIN} data {client.school}",
+            name=f"{DOMAIN} data {client.school} {child.key}".strip(),
             update_interval=timedelta(minutes=minutes) if minutes > 0 else None,
         )
         self.client = client
         self._store = store
         self._stored = stored
         self._missing_pages: set[str] = set()
-        self.student: str | None = stored.get("student")
+        self.child = child
+        self.student: str | None = child.name or (stored.get("student") if child.id is None else None)
 
     async def _page(self, key: str, errors: dict[str, str]) -> str | None:
         if key in self._missing_pages:
@@ -324,6 +368,9 @@ class EdookitDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         return None
 
     async def _async_update_data(self) -> dict[str, Any]:
+        return await _as_child(self.client, self.child, self._fetch)
+
+    async def _fetch(self) -> dict[str, Any]:
         entry = self.config_entry
         today = dt_util.now().date()
         errors: dict[str, str] = {}
@@ -332,8 +379,9 @@ class EdookitDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         try:
             dashboard = await self._page("dashboard", errors)
             if dashboard:
-                self.student = parsers.parse_student_name(dashboard) or self.student
-                self._stored["student"] = self.student
+                if self.child.id is None:
+                    self.student = parsers.parse_student_name(dashboard) or self.student
+                    self._stored["student"] = self.student
                 data["action_items"] = parsers.parse_action_items(dashboard)
                 data["school_year"] = parsers.parse_school_year(dashboard)
 
@@ -443,8 +491,12 @@ class EdookitDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             errors["substitutions"] = str(err)
 
     def _fire_new_items(self, inbox: list[dict[str, Any]]) -> None:
+        # One "seen" ledger per account: an item shown for both children is announced once.
         seen: dict[str, str] = self._stored.setdefault("seen", {})
-        first_run = not seen
+        seeded: list[str] = self._stored.setdefault("seeded", [""] if seen else [])
+        first_run = self.child.key not in seeded
+        if first_run:
+            seeded.append(self.child.key)
         now = dt_util.now()
         for item in inbox:
             identity = item.get("url") or f"{item['type']}|{item['title']}|{item['time']}"
@@ -457,7 +509,8 @@ class EdookitDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 EVENT_NEW_ITEM,
                 {
                     "entry_id": self.config_entry.entry_id,
-                    "student": self.student,
+                    "student": parsers.display_name(self.student),
+                    "child_id": self.child.id,
                     "type": item["type"],
                     "type_label": ITEM_TYPES.get(item["type"], item["type"]),
                     "title": item["title"],

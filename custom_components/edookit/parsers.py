@@ -186,6 +186,57 @@ def parse_student_name(html: str | BeautifulSoup) -> str | None:
     return None
 
 
+_CHILD_PARAM_RE = re.compile(r"[?&]([\w-]*?(?:student|child|person|pupil|zak|dite|kid)[\w-]*?)=(\d+)", re.I)
+_SELECTED_CLASSES = {"selected", "active", "current", "checked"}
+
+
+def parse_children(html: str | BeautifulSoup) -> list[dict[str, Any]]:
+    """Find the child switcher a parent with several children sees at the top of the portal.
+
+    The portal lists the children's names as links that select the child for the
+    session (like the school-year selector). We look for links whose URL carries a
+    student/person/child id parameter and keep the parameter that appears with the
+    most distinct ids. Returns ``[]`` when there is no switcher (one child).
+    """
+    soup = soupify(html)
+    groups: dict[str, dict[str, dict[str, Any]]] = {}
+    for el in soup.find_all(["a", "li", "div", "span", "button"]):
+        raw = el.get("href") or el.get("data-href")
+        match = _ONCLICK_URL_RE.search(el.get("onclick") or "")
+        if not raw and match:
+            raw = match.group(1)
+        if not raw or "/detail" in raw or "termSelector" in raw:
+            continue
+        found = _CHILD_PARAM_RE.search(raw.replace("&amp;", "&"))
+        if not found:
+            continue
+        name = clean(el.get("title") or "") or clean(el.get_text(" "))
+        if not name or len(name) > 80 or name.isdigit():
+            continue
+        classes = set(el.get("class", []))
+        if el.parent is not None:
+            classes |= set(el.parent.get("class", []))
+        group = groups.setdefault(found.group(1).lower(), {})
+        group.setdefault(
+            found.group(2),
+            {
+                "id": found.group(2),
+                "name": name,
+                "url": normalize_url(raw),
+                "selected": bool(classes & _SELECTED_CLASSES) or el.has_attr("selected"),
+            },
+        )
+    best = max(groups.values(), key=len, default={})
+    return list(best.values()) if len(best) >= 2 else []
+
+
+def display_name(name: str | None) -> str | None:
+    """Drop the ``(account, Plus4U id)`` suffix the portal adds to names."""
+    if not name:
+        return name
+    return re.sub(r"\s*\([^()]*\)\s*$", "", name).strip() or name
+
+
 def parse_school_year(html: str | BeautifulSoup) -> str | None:
     """Return the selected term label (``2025/26``) from the term selector."""
     soup = soupify(html)

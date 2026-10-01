@@ -137,12 +137,12 @@ async def test_setup_entities(hass: HomeAssistant, freezer: FrozenDateTimeFactor
         blocking=True,
         return_response=True,
     )
-    lessons = response[entry.entry_id]["lessons"]
+    lessons = response[entry.entry_id][0]["lessons"]
     assert [ls["subject"] for ls in lessons] == ["AJ", "PŘ"]
 
     diag = await async_get_config_entry_diagnostics(hass, entry)
     assert diag["entry"]["data"]["password"] == "**REDACTED**"
-    assert diag["timetable"]["lessons"] == 4
+    assert diag["children"][0]["timetable"]["lessons"] == 4
 
     # Minutes later the current lesson changes without any download.
     freezer.move_to("2026-09-28 09:00:00+02:00")
@@ -157,7 +157,7 @@ async def test_new_item_event(hass: HomeAssistant, freezer: FrozenDateTimeFactor
     events = async_capture_events(hass, EVENT_NEW_ITEM)
 
     # Nothing is announced for items that were already there at setup.
-    await entry.runtime_data.data.async_refresh()
+    await entry.runtime_data.children[0].data.async_refresh()
     await hass.async_block_till_done()
     assert events == []
 
@@ -167,7 +167,7 @@ async def test_new_item_event(hass: HomeAssistant, freezer: FrozenDateTimeFactor
         '<div class="object-name">Písemka z matematiky</div><div class="creator">Dvořák</div>'
         '<div class="time">Dnes, 9:00</div></div>',
     )
-    await entry.runtime_data.data.async_refresh()
+    await entry.runtime_data.children[0].data.async_refresh()
     await hass.async_block_till_done()
     assert len(events) == 1
     assert events[0].data["type"] == "exam"
@@ -210,7 +210,7 @@ async def test_options_flow(hass: HomeAssistant, freezer: FrozenDateTimeFactory,
     assert entry.options["timetable_update_time"] == "06:30:00"
     assert entry.options["ical_url"] == ""
     assert entry.state is ConfigEntryState.LOADED
-    assert entry.runtime_data.data.update_interval.total_seconds() == 1800
+    assert entry.runtime_data.children[0].data.update_interval.total_seconds() == 1800
 
 
 async def test_reauth_flow(hass: HomeAssistant, freezer: FrozenDateTimeFactory, mock_client) -> None:
@@ -225,3 +225,61 @@ async def test_reauth_flow(hass: HomeAssistant, freezer: FrozenDateTimeFactory, 
     assert result["type"] is FlowResultType.ABORT
     assert result["reason"] == "reauth_successful"
     assert entry.data["password"] == "new"
+
+
+FAMILY_DASHBOARD = """<html><head><title>Edookit</title></head><body>
+<span class="fullname">Jakub Hrubý (Jarmila Šuláková, 9549-3740-1)</span>
+<div class="students">
+  <a class="selected" href="/?mainMenu-studentSelector-new=101&amp;do=mainMenu-studentSelector-change">Anna Hrubá</a>
+  <a href="/?mainMenu-studentSelector-new=102&amp;do=mainMenu-studentSelector-change">Petr Hrubý</a>
+</div></body></html>"""
+
+
+async def test_two_children(hass: HomeAssistant, freezer: FrozenDateTimeFactory, pages) -> None:
+    """A parent account with a child switcher gets one device per child."""
+    selected = {"id": "101"}
+    pages["/"] = FAMILY_DASHBOARD
+
+    async def get_page(self, path: str) -> str:
+        if "studentSelector-new=" in path:
+            selected["id"] = path.split("studentSelector-new=")[1][:3]
+            return FAMILY_DASHBOARD.replace('class="selected" ', "").replace(
+                f'<a href="/?mainMenu-studentSelector-new={selected["id"]}',
+                f'<a class="selected" href="/?mainMenu-studentSelector-new={selected["id"]}',
+            )
+        return pages.get(path, "<html><body></body></html>")
+
+    async def timetable_pages(self, weeks: int) -> list[str]:
+        html = load("timetable_grid.html")
+        if selected["id"] == "102":  # Petr has only Monday's first lesson
+            html = html.split('<div class="lesson changed"')[0] + "</div></div></body></html>"
+        return [html]
+
+    async def login(self) -> None:
+        self.logged_in = True
+
+    with (
+        patch("custom_components.edookit.api.EdookitClient.async_login", login),
+        patch("custom_components.edookit.api.EdookitClient.async_get_page", get_page),
+        patch("custom_components.edookit.api.EdookitClient.async_get_timetable_pages", timetable_pages),
+    ):
+        entry = await _setup(hass, freezer)
+        assert entry.state is ConfigEntryState.LOADED
+        assert [c.name for c in entry.runtime_data.children] == ["Anna Hrubá", "Petr Hrubý"]
+        assert hass.states.get("sensor.edookit_anna_hruba_timetable").state == "2"
+        assert hass.states.get("sensor.edookit_petr_hruby_timetable").state == "1"
+        assert hass.states.get("sensor.edookit_anna_hruba_timetable").attributes["student"] == "Anna Hrubá"
+        assert hass.states.get("binary_sensor.edookit_petr_hruby_school_today").state == "on"
+
+        # An inbox item visible for both children is announced only once.
+        events = async_capture_events(hass, EVENT_NEW_ITEM)
+        pages["/overview/updates"] = pages["/overview/updates"].replace(
+            '<div class="items">',
+            '<div class="items"><div class="item poll" onclick=\'window.location.href="/polls/detail?poll=9"\'>'
+            '<div class="object-name">Anketa</div><div class="time">Dnes, 9:00</div></div>',
+        )
+        for child in entry.runtime_data.children:
+            await child.data.async_refresh()
+        await hass.async_block_till_done()
+        assert len(events) == 1
+        assert events[0].data["child_id"] in ("101", "102")
