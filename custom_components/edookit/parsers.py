@@ -1115,21 +1115,49 @@ def _parse_grid(node: Tag) -> list[dict[str, Any]]:
             }
         else:
             info = _lesson_info(infos.get(lesson_id or ""))
-            short = re.sub(r"(?i)zrušeno|odpadá", " ", rows[0] if rows else text)
+            # Status label in orange: "Zrušeno" (cancelled) or "Událost" (replaced by an
+            # event); orange text without a label marks a change (room, teacher, …).
+            orange = el.find("span", style=re.compile(r"ea8400", re.I))
+            status_el = orange.find("b") if orange else None
+            status = clean(status_el.get_text()) if status_el else None
+            if status:
+                cancelled = True
+            struck = el.find("s")
+            short = (
+                clean(struck.get_text(" ")) if struck else re.sub(r"(?i)zrušeno|odpadá", " ", rows[0] if rows else text)
+            )
             short = clean(short) or None
+            badges = [
+                clean(b.get_text(" "))
+                for b in el.find_all("span", style=re.compile(r"border-radius"))
+                if clean(b.get_text(" "))
+            ]
+            exam = next(
+                (
+                    clean(re.sub(r"^(Pís|Zk|Test)\w*\.?\s*-?\s*", "", b))
+                    for b in badges
+                    if re.match(r"(Pís|Zk|Test)", b)
+                ),
+                None,
+            )
             lesson = {
                 "date": when.isoformat(),
                 "start": info.get("start") or (period or {}).get("start"),
                 "end": info.get("end") or (period or {}).get("end"),
                 "subject": info.get("subject") or short or text,
-                "subject_short": info.get("code") or short,
+                # What the portal shows in the box ("Tv"), not the code with the group ("Tv d").
+                "subject_short": short or info.get("code"),
                 "teacher": info.get("teacher") or (rows[1] if len(rows) > 1 and rows[1] else None),
+                "teacher_short": info.get("teacher_short") or (rows[1] if len(rows) > 1 and rows[1] else None),
                 "room": info.get("room") or (rows[2] if len(rows) > 2 and rows[2] else None),
                 "group": info.get("group"),
                 "topic": info.get("topic"),
                 "period": (period or {}).get("period"),
-                "changed": cancelled or bool(_CHANGE_RE.search(" ".join(classes))),
+                "changed": cancelled or orange is not None or bool(_CHANGE_RE.search(" ".join(classes))),
                 "cancelled": cancelled,
+                "status": status or ("Zrušeno" if cancelled else None),
+                "exam": exam,
+                "badges": badges,
                 "note": None,
                 "kind": "lesson",
                 "url": None,

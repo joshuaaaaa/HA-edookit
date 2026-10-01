@@ -69,29 +69,33 @@ COMPACT_KEYS = (
     "subject_short",
     "room",
     "teacher",
+    "teacher_short",
     "topic",
+    "exam",
+    "status",
     "kind",
     "changed",
     "cancelled",
 )
 
 
+def timetable_exams(lessons: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Written tests marked in the timetable ("Pís. - …" badges)."""
+    return [
+        {
+            "title": ls["exam"],
+            "subject": ls.get("subject"),
+            "date": f"{ls['date']}T{ls['start']}:00" if ls.get("start") else ls["date"],
+            "end": f"{ls['date']}T{ls['end']}:00" if ls.get("end") else None,
+            "period": ls.get("period"),
+            "description": None,
+            "url": None,
+        }
+        for ls in lessons
+        if ls.get("exam")
+    ]
+
+
 def compact(lesson: dict[str, Any]) -> dict[str, Any]:
     """Short lesson representation for attributes."""
-    return {
-        k: lesson.get(k)
-        for k in (
-            "period",
-            "start",
-            "end",
-            "subject",
-            "subject_short",
-            "room",
-            "teacher",
-            "topic",
-            "kind",
-            "changed",
-            "cancelled",
-        )
-        if lesson.get(k) not in (None, "", False)
-    }
+    return {k: lesson.get(k) for k in COMPACT_KEYS if lesson.get(k) not in (None, "", False)}

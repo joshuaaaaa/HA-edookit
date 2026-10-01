@@ -1,54 +1,61 @@
 /*
  * Edookit timetable card for Home Assistant.
  *
- * Shows the timetable stored in the attributes of the Edookit "Rozvrh"
- * sensor (sensor.*_rozvrh / sensor.*_timetable): a week grid (days x
- * periods) or a single-day list. The integration downloads the timetable
- * once a day at the time set in its options; the card just renders it.
+ * Renders the timetable stored in the attributes of the Edookit "Rozvrh"
+ * sensor in the look of the Edookit parent portal ("Rozvrh žáků"): days as
+ * rows, periods as columns, lesson boxes with subject, teacher and room,
+ * "Zrušeno" / "Událost" in orange, written tests as green badges and school
+ * events as a purple bar under the day. A day list is available for narrow
+ * cards. The integration downloads the timetable once a day; the card only
+ * renders it.
  *
  *   type: custom:edookit-timetable-card
- *   entity: sensor.jan_novak_rozvrh
+ *   entity: sensor.edookit_laura_hruba_rozvrh
  */
 
-const CARD_VERSION = "0.1.0";
+const CARD_VERSION = "0.3.0";
 
 const STRINGS = {
   cs: {
     noEntity: "Vyberte entitu rozvrhu Edookit",
     notFound: "Entita nenalezena",
-    noData: "Rozvrh zatím není načten",
     unavailable: "Entita není dostupná – zkontrolujte, že je integrace načtená a entita existuje.",
+    noData: "Rozvrh zatím není načten",
+    empty:
+      "Rozvrh je prázdný. Integrace nenašla žádné hodiny – zkontrolujte senzor Poslední aktualizace (atribut errors) nebo zavolejte službu edookit.dump_pages.",
     free: "Volno 🎉",
-    empty: "Rozvrh je prázdný. Integrace nenašla žádné hodiny – zkontrolujte senzor Poslední aktualizace (atribut errors) nebo zavolejte službu edookit.dump_pages.",
-    period: ".",
-    updated: "Aktualizováno",
-    cancelled: "zrušeno",
-    changed: "změna",
+    week: (a, b) => `Týden od ${a} do ${b}`,
+    currentWeek: "Aktuální týden",
     today: "Dnes",
     tomorrow: "Zítra",
-    week: "Týden",
+    updated: "Aktualizováno",
+    cancelled: "Zrušeno",
+    changed: "Změna",
+    exam: "Pís.",
+    topic: "Učivo",
     prev: "Předchozí",
     next: "Další",
-    now: "Teď",
     lessons: (n) => (n === 1 ? "1 hodina" : n >= 2 && n <= 4 ? `${n} hodiny` : `${n} hodin`),
   },
   en: {
     noEntity: "Select an Edookit timetable entity",
     notFound: "Entity not found",
-    noData: "Timetable not loaded yet",
     unavailable: "Entity unavailable – check that the integration is loaded and the entity exists.",
+    noData: "Timetable not loaded yet",
+    empty:
+      "The timetable is empty. The integration found no lessons – check the Last update sensor (errors attribute) or call the edookit.dump_pages service.",
     free: "No lessons 🎉",
-    empty: "The timetable is empty. The integration found no lessons – check the Last update sensor (errors attribute) or call the edookit.dump_pages service.",
-    period: ".",
-    updated: "Updated",
-    cancelled: "cancelled",
-    changed: "changed",
+    week: (a, b) => `Week ${a} – ${b}`,
+    currentWeek: "This week",
     today: "Today",
     tomorrow: "Tomorrow",
-    week: "Week",
+    updated: "Updated",
+    cancelled: "Cancelled",
+    changed: "Changed",
+    exam: "Test",
+    topic: "Topic",
     prev: "Previous",
     next: "Next",
-    now: "Now",
     lessons: (n) => (n === 1 ? "1 lesson" : `${n} lessons`),
   },
 };
@@ -56,12 +63,15 @@ const STRINGS = {
 const DEFAULTS = {
   view: "week", // week | day | auto (auto = day list when the card is narrower than 400 px)
   show_room: true,
-  show_teacher: false,
+  show_teacher: true,
   show_times: true,
   show_footer: true,
-  short_names: "auto", // auto | true | false
+  show_exams: true,
+  show_header: true,
+  short_names: true, // big subject abbreviation like the portal (false = full subject names)
   highlight_now: true,
-  next_week_from: "friday_after_school", // when to jump to the next week: friday_after_school | saturday | never
+  next_week_from: "friday_after_school", // friday_after_school | saturday | never
+  colorize: false, // tint lessons by subject instead of the portal's grey boxes
   subject_colors: {},
 };
 
@@ -72,6 +82,7 @@ const toMinutes = (hhmm) => {
   const [h, m] = hhmm.split(":").map(Number);
   return h * 60 + m;
 };
+const dm = (d) => `${d.getDate()}. ${d.getMonth() + 1}.`;
 const escapeHtml = (s) =>
   String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 
@@ -83,8 +94,7 @@ function subjectHue(name) {
 
 function mondayOf(dateStr) {
   const d = new Date(`${dateStr}T12:00:00`);
-  const wd = (d.getDay() + 6) % 7;
-  d.setDate(d.getDate() - wd);
+  d.setDate(d.getDate() - ((d.getDay() + 6) % 7));
   return isoDate(d);
 }
 
@@ -119,7 +129,7 @@ class EdookitTimetableCard extends HTMLElement {
   set hass(hass) {
     this._hass = hass;
     const st = this._config && hass.states[this._config.entity];
-    // Re-render when the entity changes or at most once a minute (current-lesson highlight).
+    // Re-render when the entity changes or once a minute (current lesson highlight).
     const key = `${st?.last_updated}|${st?.state}|${Math.floor(Date.now() / 60000)}|${hass.language}`;
     if (key !== this._lastKey) {
       this._lastKey = key;
@@ -146,7 +156,7 @@ class EdookitTimetableCard extends HTMLElement {
   }
 
   getCardSize() {
-    return this._effectiveView() === "week" ? 6 : 4;
+    return this._effectiveView() === "week" ? 7 : 5;
   }
 
   getGridOptions() {
@@ -169,10 +179,7 @@ class EdookitTimetableCard extends HTMLElement {
     for (const day of days) {
       const monday = mondayOf(day.date);
       let week = weeks.find((w) => w.monday === monday);
-      if (!week) {
-        week = { monday, days: [] };
-        weeks.push(week);
-      }
+      if (!week) weeks.push((week = { monday, days: [] }));
       week.days.push(day);
     }
     return weeks;
@@ -181,9 +188,8 @@ class EdookitTimetableCard extends HTMLElement {
   _autoWeekIndex(weeks, attrs) {
     const now = new Date();
     const today = isoDate(now);
-    const thisMonday = mondayOf(today);
-    let idx = weeks.findIndex((w) => w.monday === thisMonday);
-    if (idx < 0) idx = weeks.findIndex((w) => w.monday > thisMonday);
+    let idx = weeks.findIndex((w) => w.monday === mondayOf(today));
+    if (idx < 0) idx = weeks.findIndex((w) => w.monday > mondayOf(today));
     if (idx < 0) return Math.max(0, weeks.length - 1);
     const mode = this._config.next_week_from;
     const wd = (now.getDay() + 6) % 7;
@@ -194,8 +200,7 @@ class EdookitTimetableCard extends HTMLElement {
       else if (wd === 4) {
         const todays = (attrs.days || []).find((d) => d.date === today)?.lessons || [];
         const ends = todays.map((l) => toMinutes(l.end || l.start)).filter((m) => m !== null);
-        const last = ends.length ? Math.max(...ends) : 12 * 60;
-        jump = now.getHours() * 60 + now.getMinutes() >= last;
+        jump = now.getHours() * 60 + now.getMinutes() >= (ends.length ? Math.max(...ends) : 12 * 60);
       }
     }
     if (jump && idx + 1 < weeks.length) idx += 1;
@@ -212,28 +217,17 @@ class EdookitTimetableCard extends HTMLElement {
           bell.push({ period: l.period, start: l.start, end: l.end });
         }
     bell.sort((a, b) => a.period - b.period);
-    // Hide trailing/leading periods that are empty in the shown week.
-    const used = new Set(
-      days.flatMap((d) =>
-        (d.lessons || []).flatMap((l) =>
-          l.kind === "event" && l.period_end
-            ? Array.from({ length: l.period_end - l.period + 1 }, (_, i) => l.period + i)
-            : [l.period]
-        )
-      )
-    );
-    const usedList = bell.filter((b) => used.has(b.period));
-    if (!usedList.length) return [];
-    const first = usedList[0].period;
-    const last = usedList[usedList.length - 1].period;
-    return bell.filter((b) => b.period >= first && b.period <= last);
-  }
-
-  _color(subject) {
-    const custom = this._config.subject_colors?.[subject];
-    if (custom) return { bg: `color-mix(in srgb, ${custom} 22%, transparent)`, border: custom };
-    const hue = subjectHue(subject);
-    return { bg: `hsla(${hue}, 70%, 55%, 0.16)`, border: `hsl(${hue}, 60%, 48%)` };
+    const used = new Set();
+    for (const d of days)
+      for (const l of d.lessons || []) {
+        if (!l.period) continue;
+        for (let p = l.period; p <= (l.kind === "event" && l.period_end ? l.period_end : l.period); p++) used.add(p);
+      }
+    if (!used.size) return [];
+    const first = Math.min(...used);
+    const last = Math.max(...used);
+    // Like the portal: from the 1st period (or the first used one) to the last used one.
+    return bell.filter((b) => b.period >= Math.min(first, 1) && b.period <= last);
   }
 
   _isNow(lesson, dateStr) {
@@ -246,35 +240,49 @@ class EdookitTimetableCard extends HTMLElement {
     return start !== null && mins >= start && mins < end;
   }
 
-  _lessonHtml(lesson, dateStr, compact, wide = false) {
-    const c = this._color(lesson.subject);
-    const classes = ["lesson"];
-    if (lesson.cancelled) classes.push("cancelled");
-    else if (lesson.changed) classes.push("changed");
-    if (this._isNow(lesson, dateStr)) classes.push("now");
-    const name = compact ? lesson.subject_short || lesson.subject : lesson.subject;
-    const meta = [];
-    if (this._config.show_room && lesson.room) meta.push(`<span class="room">${escapeHtml(lesson.room)}</span>`);
-    if (this._config.show_teacher && lesson.teacher) meta.push(`<span class="teacher">${escapeHtml(lesson.teacher)}</span>`);
-    if (wide && lesson.topic) meta.push(`<span class="topic">${escapeHtml(lesson.topic)}</span>`);
-    if (wide && (lesson.cancelled || lesson.changed))
-      meta.push(`<span class="badge">${lesson.cancelled ? this._t.cancelled : this._t.changed}</span>`);
-    const tooltip = [
-      lesson.subject,
-      lesson.start && `${lesson.start}${lesson.end ? "–" + lesson.end : ""}`,
-      lesson.room,
-      lesson.teacher,
-      lesson.group,
-      lesson.cancelled ? this._t.cancelled : lesson.changed ? this._t.changed : "",
-      lesson.topic && `Učivo: ${lesson.topic}`,
-      lesson.note,
+  _tooltip(l) {
+    const t = this._t;
+    return [
+      l.subject_short && l.subject && l.subject_short !== l.subject ? `${l.subject_short} (${l.subject})` : l.subject,
+      l.teacher,
+      l.room,
+      l.start && `${l.start}–${l.end || ""}`,
+      l.status || (l.changed ? t.changed : ""),
+      l.exam && `${t.exam} – ${l.exam}`,
+      l.topic && `${t.topic}: ${l.topic}`,
     ]
       .filter(Boolean)
       .join("\n");
-    if (wide) classes.push("wide");
-    return `<div class="${classes.join(" ")}" style="--bg:${c.bg};--accent:${c.border}" title="${escapeHtml(tooltip)}">
-        <div class="subject">${escapeHtml(name)}</div>
-        ${meta.length ? `<div class="meta">${meta.join(" · ")}</div>` : ""}
+  }
+
+  _style(l) {
+    if (!this._config.colorize) return "";
+    const custom = this._config.subject_colors?.[l.subject] || this._config.subject_colors?.[l.subject_short];
+    const hue = subjectHue(l.subject);
+    const color = custom || `hsl(${hue}, 60%, 48%)`;
+    return `style="--lesson-bg: color-mix(in srgb, ${color} 16%, var(--card-background-color, #fff)); --lesson-border: ${color};"`;
+  }
+
+  _lessonBox(l, dateStr) {
+    const t = this._t;
+    const cfg = this._config;
+    const classes = ["box"];
+    if (cfg.show_exams && l.exam) classes.push("has-exam");
+    if (l.cancelled) classes.push("cancelled");
+    else if (l.changed) classes.push("changed");
+    if (this._isNow(l, dateStr)) classes.push("now");
+    const name = cfg.short_names ? l.subject_short || l.subject : l.subject;
+    const label = l.cancelled
+      ? `<span class="status">${escapeHtml(l.status || t.cancelled)}</span> <s>${escapeHtml(name)}</s>`
+      : escapeHtml(name);
+    const exam =
+      cfg.show_exams && l.exam ? `<span class="exam" title="${escapeHtml(l.exam)}">${t.exam} - ${escapeHtml(l.exam)}</span>` : "";
+    const teacher = cfg.show_teacher && !l.cancelled ? escapeHtml(l.teacher_short || l.teacher || "") : "";
+    const room = cfg.show_room && !l.cancelled ? escapeHtml(l.room || "") : "";
+    return `<div class="${classes.join(" ")}" ${this._style(l)} title="${escapeHtml(this._tooltip(l))}">
+        ${exam}
+        <div class="name ${l.cancelled ? "small" : ""}">${label}</div>
+        ${teacher || room ? `<div class="foot"><span>${teacher}</span><span>${room}</span></div>` : ""}
       </div>`;
   }
 
@@ -283,87 +291,87 @@ class EdookitTimetableCard extends HTMLElement {
     const days = week.days;
     const periods = this._periods(attrs, days);
     if (!periods.length) return `<div class="empty">${t.free}</div>`;
-    const compact =
-      this._config.short_names === true ||
-      (this._config.short_names === "auto" && (this._width || 800) / (periods.length + 1) < 95);
     const today = isoDate(new Date());
+    const col = (period) => periods.findIndex((p) => p.period === period) + 2; // column 1 = day names
+
     const head = periods
       .map(
-        (p) => `<div class="ph">
-          <div class="pn">${p.period}${t.period}</div>
-          ${this._config.show_times && p.start ? `<div class="pt">${p.start}${p.end && !compact ? "–" + p.end : ""}</div>` : ""}
-        </div>`
+        (p) => `<div class="ph"><b>${p.period}.</b>${
+          this._config.show_times && p.start ? `<span>${p.start}–${p.end || ""}</span>` : ""
+        }</div>`
       )
       .join("");
-    const rows = days
+
+    let row = 2;
+    const body = days
       .map((day) => {
-        const d = new Date(`${day.date}T12:00:00`);
         const all = day.lessons || [];
-        const lessonsOnly = all.filter((l) => l.kind !== "event");
-        const wholeDay = all.filter((l) => l.kind === "event" && (l.all_day || !l.period));
-        let cells = "";
-        if (wholeDay.length && !lessonsOnly.some((l) => !l.cancelled)) {
-          // Holiday / day off: one banner across the whole row.
-          cells = `<div class="cell" style="grid-column: span ${periods.length}">${wholeDay
-            .map((ev) => this._eventHtml(ev))
+        const lessons = all.filter((l) => l.kind !== "event");
+        const events = all.filter((l) => l.kind === "event");
+        const d = new Date(`${day.date}T12:00:00`);
+        const rows = events.length ? 2 : 1;
+        let html = `<div class="dh ${day.date === today ? "today" : ""}" style="grid-row:${row} / span ${rows}">
+            <b>${escapeHtml(day.weekday_short)}</b><span>${dm(d)}</span></div>`;
+        for (const p of periods) {
+          const here = lessons.filter((l) => l.period === p.period);
+          html += `<div class="cell" style="grid-row:${row};grid-column:${col(p.period)}">${here
+            .map((l) => this._lessonBox(l, day.date))
             .join("")}</div>`;
-        } else {
-          for (let i = 0; i < periods.length; i++) {
-            const p = periods[i];
-            const ev = all.find((l) => l.kind === "event" && !l.all_day && l.period === p.period);
-            if (ev) {
-              // Trip / project day covering several periods.
-              const last = periods.findIndex((x) => x.period === (ev.period_end || ev.period));
-              const span = Math.max(1, (last < 0 ? i : last) - i + 1);
-              cells += `<div class="cell" style="grid-column: span ${span}">${this._eventHtml(ev)}</div>`;
-              i += span - 1;
-              continue;
-            }
-            const lessons = lessonsOnly.filter((l) => l.period === p.period);
-            cells += `<div class="cell">${lessons.map((l) => this._lessonHtml(l, day.date, compact)).join("")}</div>`;
-          }
         }
-        return `<div class="dh ${day.date === today ? "today" : ""}">
-            <div class="dn">${escapeHtml(day.weekday_short)}</div>
-            <div class="dd">${d.getDate()}. ${d.getMonth() + 1}.</div>
-          </div>${cells}`;
+        // School events: a purple bar under the day's lessons, over the periods they cover.
+        for (const ev of events) {
+          const from = ev.all_day || !ev.period ? 2 : Math.max(2, col(ev.period));
+          const to = ev.all_day || !ev.period ? periods.length + 2 : Math.max(from + 1, col(ev.period_end || ev.period) + 1);
+          html += `<div class="event" style="grid-row:${row + 1};grid-column:${from} / ${to}" title="${escapeHtml(
+            [ev.subject, ev.start && `${ev.start}–${ev.end || ""}`].filter(Boolean).join("\n")
+          )}">${escapeHtml(ev.subject)}</div>`;
+        }
+        row += rows;
+        return html;
       })
       .join("");
-    // Each period column needs ~40 px; narrower cards scroll horizontally instead of hiding the week.
-    return `<div class="scroll"><div class="grid" style="grid-template-columns: 44px repeat(${periods.length}, minmax(40px, 1fr)); min-width: ${44 + periods.length * 44}px;">
-        <div class="corner"></div>${head}${rows}
-      </div></div>`;
-  }
 
-  _eventHtml(ev) {
-    const when = ev.all_day ? "" : ev.start ? `${ev.start}–${ev.end || ""}` : "";
-    return `<div class="lesson event" title="${escapeHtml([ev.subject, when].filter(Boolean).join("\n"))}">
-        <div class="subject">★ ${escapeHtml(ev.subject)}</div>
-        ${when ? `<div class="meta">${when}</div>` : ""}
-      </div>`;
+    return `<div class="scroll"><div class="grid" style="grid-template-columns: 46px repeat(${periods.length}, minmax(48px, 1fr)); min-width: ${
+      46 + periods.length * 52
+    }px;"><div class="corner"></div>${head}${body}</div></div>`;
   }
 
   _dayHtml(day) {
     const t = this._t;
-    const lessons = day?.lessons || [];
-    if (!lessons.length) return `<div class="empty">${t.free}</div>`;
-    return `<div class="daylist">${lessons
-      .map((l) => {
-        if (l.kind === "event")
-          return `<div class="row">
-            <div class="when"><div class="pt">${l.start ? `${l.start}<br>${l.end || ""}` : ""}</div></div>
-            ${this._eventHtml(l).replace('class="lesson event"', 'class="lesson event wide"')}
+    const all = day?.lessons || [];
+    if (!all.length) return `<div class="empty">${t.free}</div>`;
+    const events = all.filter((l) => l.kind === "event");
+    const lessons = all.filter((l) => l.kind !== "event");
+    return `<div class="daylist">
+      ${events
+        .map(
+          (ev) =>
+            `<div class="event">${escapeHtml(ev.subject)}${ev.start && !ev.all_day ? ` · ${ev.start}–${ev.end || ""}` : ""}</div>`
+        )
+        .join("")}
+      ${lessons
+        .map((l) => {
+          const now = this._isNow(l, day.date);
+          const meta = [
+            this._config.show_teacher && l.teacher,
+            this._config.show_room && l.room,
+            l.topic && `${t.topic}: ${l.topic}`,
+          ].filter(Boolean);
+          return `<div class="row ${now ? "is-now" : ""} ${l.cancelled ? "cancelled" : l.changed ? "changed" : ""}">
+            <div class="when"><b>${l.period ? l.period + "." : ""}</b>${
+              this._config.show_times && l.start ? `<span>${l.start}<br>${l.end || ""}</span>` : ""
+            }</div>
+            <div class="box wide" ${this._style(l)} title="${escapeHtml(this._tooltip(l))}">
+              ${this._config.show_exams && l.exam ? `<span class="exam">${t.exam} - ${escapeHtml(l.exam)}</span>` : ""}
+              <div class="name">${
+                l.cancelled ? `<span class="status">${escapeHtml(l.status || t.cancelled)}</span> <s>${escapeHtml(l.subject)}</s>` : escapeHtml(l.subject)
+              }</div>
+              ${meta.length ? `<div class="meta">${meta.map(escapeHtml).join(" · ")}</div>` : ""}
+            </div>
           </div>`;
-        const now = this._isNow(l, day.date);
-        return `<div class="row ${now ? "is-now" : ""}">
-          <div class="when">
-            <div class="pn">${l.period ? l.period + t.period : ""}</div>
-            ${this._config.show_times && l.start ? `<div class="pt">${l.start}${l.end ? "<br>" + l.end : ""}</div>` : ""}
-          </div>
-          ${this._lessonHtml(l, day.date, false, true)}
-        </div>`;
-      })
-      .join("")}</div>`;
+        })
+        .join("")}
+    </div>`;
   }
 
   _render() {
@@ -374,7 +382,8 @@ class EdookitTimetableCard extends HTMLElement {
     let body = "";
     let nav = "";
     let footer = "";
-    let title = cfg.title ?? "";
+    let title = "";
+    let subtitle = "";
 
     if (!cfg.entity) body = `<div class="empty">${t.noEntity}</div>`;
     else if (!st) body = `<div class="empty">${t.notFound}: ${escapeHtml(cfg.entity)}</div>`;
@@ -382,7 +391,8 @@ class EdookitTimetableCard extends HTMLElement {
     else {
       const attrs = st.attributes || {};
       const days = attrs.days || [];
-      if (cfg.title === undefined) title = attrs.student ? `${attrs.student}`.replace(/\s*\(.*\)\s*$/, "") : attrs.friendly_name || "Rozvrh";
+      title = cfg.title ?? (attrs.student ? `${attrs.student}`.replace(/\s*\(.*\)\s*$/, "") : attrs.friendly_name || "Rozvrh");
+      subtitle = cfg.title === undefined ? attrs.class_name || "" : "";
       const total = days.reduce((n, d) => n + (d.lessons || []).length, 0);
       if (!days.length) body = `<div class="empty">${t.noData}</div>`;
       else if (!total) body = `<div class="empty">${t.empty}</div>`;
@@ -391,23 +401,24 @@ class EdookitTimetableCard extends HTMLElement {
         const auto = this._autoWeekIndex(weeks, attrs);
         const idx = Math.min(Math.max(this._weekIndex ?? auto, 0), weeks.length - 1);
         const week = weeks[idx];
-        const first = new Date(`${week.days[0].date}T12:00:00`);
-        const last = new Date(`${week.days[week.days.length - 1].date}T12:00:00`);
+        const monday = new Date(`${week.monday}T12:00:00`);
+        const sunday = new Date(monday);
+        sunday.setDate(sunday.getDate() + 6);
         nav = `<div class="nav">
-            <button class="prev" ${idx === 0 ? "disabled" : ""} title="${t.prev}">‹</button>
-            <span class="label">${first.getDate()}. ${first.getMonth() + 1}. – ${last.getDate()}. ${last.getMonth() + 1}.</span>
-            <button class="next" ${idx >= weeks.length - 1 ? "disabled" : ""} title="${t.next}">›</button>
+            <button class="prev" ${idx === 0 ? "disabled" : ""} title="${t.prev}">←</button>
+            <b>${t.week(dm(monday), dm(sunday))}</b>
+            <button class="next" ${idx >= weeks.length - 1 ? "disabled" : ""} title="${t.next}">→</button>
+            ${idx !== auto ? `<a class="reset">${t.currentWeek}</a>` : ""}
           </div>`;
         body = this._weekHtml(week, attrs);
-        this._navTarget = { kind: "week", idx, auto, max: weeks.length - 1 };
+        this._navTarget = { kind: "week", idx, max: weeks.length - 1 };
       } else {
         const today = isoDate(new Date());
-        // Default day: today, or the next day with lessons once today's lessons are over.
         let baseIdx = days.findIndex((d) => d.date >= today);
         if (baseIdx < 0) baseIdx = days.length - 1;
-        const todayEntry = days[baseIdx];
-        if (todayEntry?.date === today) {
-          const ends = (todayEntry.lessons || []).map((l) => toMinutes(l.end || l.start)).filter((m) => m !== null);
+        if (days[baseIdx]?.date === today) {
+          // After the last lesson, show the next day with lessons.
+          const ends = (days[baseIdx].lessons || []).map((l) => toMinutes(l.end || l.start)).filter((m) => m !== null);
           const now = new Date();
           if (!ends.length || now.getHours() * 60 + now.getMinutes() >= Math.max(...ends)) {
             const nextIdx = days.findIndex((d, i) => i > baseIdx && (d.lessons || []).length);
@@ -422,10 +433,11 @@ class EdookitTimetableCard extends HTMLElement {
         const rel = day.date === today ? t.today : day.date === isoDate(tomorrow) ? t.tomorrow : "";
         const count = (day.lessons || []).filter((l) => !l.cancelled && l.kind !== "event").length;
         nav = `<div class="nav">
-            <button class="prev" ${idx === 0 ? "disabled" : ""} title="${t.prev}">‹</button>
-            <span class="label">${rel ? `<b>${rel}</b> · ` : ""}${escapeHtml(day.weekday)} ${d.getDate()}. ${d.getMonth() + 1}.
-              <span class="count">${count ? t.lessons(count) : ""}</span></span>
-            <button class="next" ${idx >= days.length - 1 ? "disabled" : ""} title="${t.next}">›</button>
+            <button class="prev" ${idx === 0 ? "disabled" : ""} title="${t.prev}">←</button>
+            <b>${rel ? `${rel} · ` : ""}${escapeHtml(day.weekday)} ${dm(d)}</b>
+            <span class="count">${count ? t.lessons(count) : ""}</span>
+            <button class="next" ${idx >= days.length - 1 ? "disabled" : ""} title="${t.next}">→</button>
+            ${idx !== baseIdx ? `<a class="reset">${t.today}</a>` : ""}
           </div>`;
         body = this._dayHtml(day);
         this._navTarget = { kind: "day", idx, base: baseIdx, max: days.length - 1 };
@@ -441,13 +453,18 @@ class EdookitTimetableCard extends HTMLElement {
       }
     }
 
+    const header =
+      cfg.show_header && (title || nav)
+        ? `<div class="header">
+            ${title ? `<div class="title">${escapeHtml(title)} ${subtitle ? `<span class="class">${escapeHtml(subtitle)}</span>` : ""}</div>` : ""}
+            ${nav}
+          </div>`
+        : nav;
+
     this.shadowRoot.innerHTML = `
       <style>${EdookitTimetableCard.styles}</style>
       <ha-card>
-        ${title || nav ? `<div class="header">
-          ${title ? `<div class="title">${escapeHtml(title)}</div>` : ""}
-          ${nav}
-        </div>` : ""}
+        ${header}
         <div class="content">${body}</div>
         ${footer}
       </ha-card>`;
@@ -459,7 +476,7 @@ class EdookitTimetableCard extends HTMLElement {
     });
     this.shadowRoot.querySelector(".prev")?.addEventListener("click", () => this._move(-1));
     this.shadowRoot.querySelector(".next")?.addEventListener("click", () => this._move(1));
-    this.shadowRoot.querySelector(".nav .label")?.addEventListener("click", () => {
+    this.shadowRoot.querySelector(".reset")?.addEventListener("click", () => {
       this._weekIndex = null;
       this._dayOffset = 0;
       this._render();
@@ -476,55 +493,79 @@ class EdookitTimetableCard extends HTMLElement {
 
   static get styles() {
     return `
-      :host { display: block; }
+      :host {
+        display: block;
+        --edoo-box: var(--secondary-background-color, #f7f7f7);
+        --edoo-border: var(--divider-color, #c1c1c1);
+        --edoo-orange: #ea8400;
+        --edoo-green: #38d07c;
+        --edoo-event: rgba(196, 140, 230, 0.35);
+        --edoo-event-border: rgba(150, 90, 200, 0.6);
+        --edoo-link: var(--primary-color, #377fea);
+      }
       ha-card { overflow: hidden; }
-      .header { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap;
-        padding: 12px 16px 4px; }
-      .title { font-size: 1.15em; font-weight: 500; cursor: pointer; color: var(--primary-text-color); }
-      .nav { display: flex; align-items: center; gap: 6px; margin-left: auto; }
-      .nav .label { font-size: 0.92em; color: var(--secondary-text-color); cursor: pointer; text-align: center; }
-      .nav .count { opacity: 0.8; margin-left: 4px; }
-      .nav button { border: none; background: var(--secondary-background-color, rgba(127,127,127,.12));
-        color: var(--primary-text-color); width: 30px; height: 30px; border-radius: 50%; font-size: 18px;
-        line-height: 1; cursor: pointer; }
-      .nav button:disabled { opacity: 0.3; cursor: default; }
-      .content { padding: 8px 12px 12px; }
+      .header { padding: 14px 16px 6px; }
+      .title { font-size: 1.35em; color: var(--primary-text-color); cursor: pointer; }
+      .title .class { color: var(--secondary-text-color); font-size: 0.8em; margin-left: 10px; }
+      .nav { display: flex; align-items: center; gap: 10px; margin-top: 10px; color: var(--primary-text-color); flex-wrap: wrap; }
+      .nav b { font-weight: 600; }
+      .nav .count { color: var(--secondary-text-color); font-size: 0.9em; }
+      .nav button { border: none; background: none; color: var(--edoo-link); font-size: 20px; cursor: pointer; padding: 0 4px; line-height: 1; }
+      .nav button:disabled { opacity: 0.25; cursor: default; }
+      .nav .reset { margin-left: auto; color: var(--edoo-link); cursor: pointer; }
+      .content { padding: 4px 12px 12px; }
       .empty { padding: 24px 8px; text-align: center; color: var(--secondary-text-color); }
       .scroll { overflow-x: auto; }
-      .grid { display: grid; gap: 4px; }
-      .corner { }
-      .ph { text-align: center; padding: 2px 0 4px; border-bottom: 1px solid var(--divider-color); }
-      .pn { font-weight: 600; font-size: 0.9em; color: var(--primary-text-color); }
-      .pt { font-size: 0.68em; color: var(--secondary-text-color); white-space: nowrap; }
-      .dh { display: flex; flex-direction: column; justify-content: center; align-items: center; border-radius: 8px;
-        padding: 2px 0; color: var(--secondary-text-color); }
-      .dh .dn { font-weight: 600; color: var(--primary-text-color); }
-      .dh .dd { font-size: 0.72em; }
-      .dh.today { background: var(--primary-color); color: var(--text-primary-color, #fff); }
-      .dh.today .dn { color: var(--text-primary-color, #fff); }
-      .cell { display: flex; flex-direction: column; gap: 2px; min-height: 42px; }
-      .lesson { flex: 1; background: var(--bg); border-left: 3px solid var(--accent); border-radius: 6px;
-        padding: 3px 5px; min-width: 0; display: flex; flex-direction: column; justify-content: center; }
-      .lesson .subject { font-weight: 600; font-size: 0.85em; line-height: 1.15; color: var(--primary-text-color);
-        overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-      .lesson .meta { font-size: 0.7em; color: var(--secondary-text-color); overflow: hidden; text-overflow: ellipsis;
-        white-space: nowrap; }
-      .lesson.event { --bg: rgba(156, 39, 176, 0.14); --accent: #9c27b0; text-align: center; }
-      .lesson.event .subject { white-space: normal; }
-      .lesson.changed { outline: 2px dashed var(--warning-color, #ff9800); outline-offset: -2px; }
-      .lesson.cancelled { background: rgba(127,127,127,.12); border-left-color: var(--error-color, #db4437); }
-      .lesson.cancelled .subject { text-decoration: line-through; color: var(--secondary-text-color); }
-      .lesson.now { box-shadow: 0 0 0 2px var(--primary-color); }
-      .daylist { display: flex; flex-direction: column; gap: 6px; }
+      .grid { display: grid; gap: 0; border-top: 1px solid var(--edoo-border); }
+      .corner, .ph, .dh, .cell, .event { border-bottom: 1px solid var(--edoo-border); }
+      .ph { padding: 4px 4px 3px; font-size: 0.72em; color: var(--primary-text-color); border-left: 1px solid var(--edoo-border); line-height: 1.25; }
+      .ph b { display: block; }
+      .ph span { color: var(--secondary-text-color); white-space: nowrap; }
+      .dh { padding: 6px 4px; display: flex; flex-direction: column; color: var(--primary-text-color); }
+      .dh b { font-weight: 500; font-size: 1.05em; }
+      .dh span { font-size: 0.65em; color: var(--secondary-text-color); }
+      .dh.today b, .dh.today span { color: var(--edoo-link); font-weight: 700; }
+      .cell { padding: 3px; border-left: 1px solid var(--edoo-border); display: flex; flex-direction: column; gap: 3px; min-height: 52px; min-width: 0; }
+      .box {
+        position: relative; flex: 1; min-width: 0; min-height: 46px;
+        background: var(--lesson-bg, var(--edoo-box)); border: 1px solid var(--lesson-border, var(--edoo-border));
+        border-radius: 7px; display: flex; flex-direction: column; justify-content: center; padding: 2px 4px;
+        color: var(--primary-text-color); box-sizing: border-box;
+      }
+      .box .name { text-align: center; font-size: 1.35em; line-height: 1.2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding-top: 4px; }
+      .box .name.small { font-size: 0.85em; font-weight: 600; }
+      .box .foot { display: flex; justify-content: space-between; gap: 4px; font-size: 0.62em; color: var(--secondary-text-color); white-space: nowrap; }
+      .box .foot span { overflow: hidden; text-overflow: ellipsis; }
+      .box .exam {
+        position: absolute; top: 2px; right: 3px; max-width: calc(100% - 6px);
+        background: var(--edoo-green); color: #fff; border-radius: 9px; padding: 0 5px;
+        font-size: 0.55em; line-height: 1.5; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+      }
+      .box.has-exam .name { padding-top: 13px; }
+      .box.cancelled { border-color: var(--edoo-orange); }
+      .box .status { color: var(--edoo-orange); font-weight: 700; }
+      .box.cancelled s { color: var(--secondary-text-color); }
+      .box.changed { border-color: var(--edoo-orange); }
+      .box.changed .name { color: var(--edoo-orange); }
+      .box.now { box-shadow: 0 0 0 2px var(--edoo-link); }
+      .event {
+        margin: 0 3px 3px; background: var(--edoo-event); border: 1px solid var(--edoo-event-border); border-radius: 7px;
+        text-align: center; font-weight: 600; font-size: 0.8em; padding: 4px 6px; color: var(--primary-text-color);
+        white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+      }
+      .daylist { display: flex; flex-direction: column; gap: 6px; padding-top: 6px; }
+      .daylist .event { margin: 0; white-space: normal; }
       .row { display: flex; gap: 10px; align-items: stretch; }
-      .row .when { width: 46px; flex: none; text-align: center; display: flex; flex-direction: column; justify-content: center; }
-      .row .when .pt { font-size: 0.72em; line-height: 1.25; }
-      .lesson.wide { padding: 6px 10px; }
-      .lesson.wide .subject { font-size: 1em; white-space: normal; }
-      .lesson.wide .meta { font-size: 0.8em; white-space: normal; }
-      .row.is-now .when .pn { color: var(--primary-color); }
-      .badge { color: var(--warning-color, #ff9800); font-weight: 600; text-transform: uppercase; font-size: 0.85em; }
-      .lesson.cancelled .badge { color: var(--error-color, #db4437); }
+      .row .when { color: var(--primary-text-color); width: 44px; flex: none; text-align: center; display: flex; flex-direction: column; justify-content: center; font-size: 0.8em; }
+      .row .when span { color: var(--secondary-text-color); font-size: 0.9em; line-height: 1.25; }
+      .row.is-now .when b { color: var(--edoo-link); }
+      .box.wide { padding: 8px 10px; }
+      .box.wide.has-exam .name, .box.wide .name { padding-top: 0; }
+      .box.wide .name { text-align: left; font-size: 1.05em; font-weight: 600; white-space: normal; padding-top: 0; }
+      .box.wide .meta { font-size: 0.8em; color: var(--secondary-text-color); margin-top: 2px; }
+      .box.wide .exam { position: static; display: inline-block; align-self: flex-start; font-size: 0.72em; margin-bottom: 3px; }
+      .row.cancelled .box { border-color: var(--edoo-orange); }
+      .row.changed .box { border-color: var(--edoo-orange); }
       .footer { padding: 0 16px 10px; font-size: 0.72em; color: var(--secondary-text-color); text-align: right; }
     `;
   }
@@ -552,8 +593,8 @@ class EdookitTimetableCardEditor extends HTMLElement {
           select: {
             mode: "dropdown",
             options: [
+              { value: "week", label: "Týden (mřížka jako na portálu)" },
               { value: "auto", label: "Automaticky (podle šířky)" },
-              { value: "week", label: "Týden (mřížka)" },
               { value: "day", label: "Den (seznam)" },
             ],
           },
@@ -578,6 +619,9 @@ class EdookitTimetableCardEditor extends HTMLElement {
         schema: [
           { name: "show_room", selector: { boolean: {} } },
           { name: "show_teacher", selector: { boolean: {} } },
+          { name: "show_exams", selector: { boolean: {} } },
+          { name: "short_names", selector: { boolean: {} } },
+          { name: "colorize", selector: { boolean: {} } },
           { name: "show_times", selector: { boolean: {} } },
           { name: "show_footer", selector: { boolean: {} } },
           { name: "highlight_now", selector: { boolean: {} } },
@@ -598,6 +642,9 @@ class EdookitTimetableCardEditor extends HTMLElement {
           next_week_from: "Přepnout na další týden",
           show_room: "Učebna",
           show_teacher: "Vyučující",
+          show_exams: "Písemky",
+          short_names: "Zkratky předmětů (jako na portálu)",
+          colorize: "Barevně podle předmětu",
           show_times: "Časy hodin",
           show_footer: "Čas aktualizace",
           highlight_now: "Zvýraznit probíhající hodinu",

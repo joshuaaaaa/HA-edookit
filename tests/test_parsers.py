@@ -218,3 +218,22 @@ def test_family_dashboard_real_layout():
     today = [ls for ls in lessons if ls["date"] == "2026-10-01"]
     assert [ls["subject_short"] for ls in today] == ["D", "Čj", "Z", "SM", "Vv", "Vv"]
     assert today[1]["topic"] == "Sloh: inzerát."
+
+
+def test_family_dashboard_states_and_exams():
+    petr = parsers.parse_dashboard_children(load("family_dashboard.html"), date(2026, 10, 1))[1]
+    by_key = {(ls["date"], ls["period"]): ls for ls in petr["lessons"] if ls["kind"] == "lesson"}
+    # Written tests ("Pís. - …" badges)
+    assert by_key[("2026-09-30", 2)]["exam"] == "Pravopisné cvičení - září"
+    assert by_key[("2026-09-30", 3)]["exam"] == "Opakování 5. třídy"
+    assert by_key[("2026-10-01", 4)]["exam"] == "Geometrické značky"
+    # "Zrušeno" (holiday) and "Událost" (replaced by the trip), shown struck through
+    assert by_key[("2026-09-28", 1)]["status"] == "Zrušeno"
+    assert by_key[("2026-10-02", 1)]["status"] == "Událost"
+    assert by_key[("2026-10-02", 1)]["cancelled"]
+    # Orange subject without a label = change (other room)
+    changed = by_key[("2026-09-30", 8)]
+    assert changed["changed"] and not changed["cancelled"] and changed["room"] == "PC 2. patro"
+    # Short name as shown in the portal box, teacher abbreviation for the box corner
+    assert by_key[("2026-09-29", 3)]["subject_short"] == "Tv"
+    assert by_key[("2026-09-29", 1)]["teacher_short"] == "Še"

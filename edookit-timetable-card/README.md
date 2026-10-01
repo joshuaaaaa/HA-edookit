@@ -31,18 +31,24 @@ entity: sensor.edookit_jan_novak_rozvrh
 | Volba | Výchozí | Popis |
 |---|---|---|
 | `entity` | – | senzor **Rozvrh** z integrace Edookit (povinné) |
-| `title` | jméno žáka | nadpis (`""` = bez nadpisu) |
-| `view` | `week` | `week` = týdenní mřížka (dny × hodiny; v úzkém sloupci se dá posouvat do strany), `day` = seznam na jeden den, `auto` = pod 400 px šířky seznam, jinak týden |
-| `show_room` | `true` | učebna |
-| `show_teacher` | `false` | vyučující |
-| `show_times` | `true` | časy hodin |
+| `title` | jméno žáka + třída | nadpis (`""` = bez nadpisu) |
+| `view` | `week` | `week` = týdenní mřížka jako na portálu (v úzkém sloupci se posouvá do strany), `day` = seznam na jeden den (s učivem), `auto` = pod 400 px seznam, jinak týden |
+| `show_teacher` | `true` | zkratka vyučujícího vlevo dole |
+| `show_room` | `true` | učebna vpravo dole |
+| `show_exams` | `true` | zelené štítky písemek („Pís. - …“) |
+| `show_times` | `true` | časy hodin v záhlaví |
+| `show_header` | `true` | jméno, třída a přepínání týdnů |
 | `show_footer` | `true` | čas poslední aktualizace |
+| `short_names` | `true` | velké zkratky předmětů jako na portálu (`false` = celé názvy) |
 | `highlight_now` | `true` | zvýraznit probíhající hodinu |
-| `short_names` | `auto` | zkratky předmětů v úzké mřížce (`true` / `false` / `auto`) |
+| `colorize` | `false` | obarvit hodiny podle předmětu místo šedých políček portálu |
+| `subject_colors` | – | vlastní barvy pro `colorize`, např. `{Matematika: "#7e57c2"}` |
 | `next_week_from` | `friday_after_school` | kdy přepnout na další týden: `friday_after_school`, `saturday`, `never` |
-| `subject_colors` | – | vlastní barvy, např. `{Matematika: "#7e57c2"}`; jinak se barva odvodí z názvu |
 
-Šipkami se přepínají týdny (resp. dny), kliknutím na datum se vrátíte na dnešek, kliknutím na
-nadpis otevřete detail entity. Zrušené hodiny jsou přeškrtnuté, změněné (suplování) mají čárkovaný rámeček.
+Vzhled odpovídá „Rozvrhu žáků“ na portálu: zkratka předmětu uprostřed, vyučující a učebna dole,
+**Zrušeno** / **Událost** oranžově s přeškrtnutým předmětem, změna (např. jiná učebna) oranžově,
+písemky jako zelený štítek a akce školy (svátek, výlet) jako fialový pruh pod dnem.
+Šipkami ← → se přepínají týdny (resp. dny), odkaz „Aktuální týden“ vrací na dnešek, kliknutím na
+jméno otevřete detail entity. Po najetí myší se ukáže detail hodiny včetně učiva.
 
 Karta jen zobrazuje data senzoru – rozvrh stahuje integrace jednou denně v nastavený čas.

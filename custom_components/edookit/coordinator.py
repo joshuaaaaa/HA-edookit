@@ -342,7 +342,7 @@ def build_days(lessons: list[dict[str, Any]], start: date, end: date) -> list[di
 PAGES = {
     "dashboard": "/",
     "inbox": "/overview/updates",
-    "evaluations": "/evaluation/list",
+    "evaluations": "/evaluation/listing",
     "assignments": "/assignments/",
     "exams": "/exams/",
     "events": "/timetable/upcoming",

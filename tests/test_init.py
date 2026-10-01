@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import timedelta
 from unittest.mock import AsyncMock, patch
 
 from freezegun.api import FrozenDateTimeFactory
@@ -25,7 +26,7 @@ from .conftest import load
 PAGES = {
     "/": "dashboard.html",
     "/overview/updates": "inbox.html",
-    "/evaluation/list": "evaluation_list.html",
+    "/evaluation/listing": "evaluation_list.html",
     "/timetable/upcoming": "upcoming.html",
     "/payments/": "payments.html",
 }
@@ -337,6 +338,20 @@ async def test_family_portal_two_children(hass: HomeAssistant, freezer: FrozenDa
     assert hass.states.get("sensor.edookit_petr_novak_absences").state == "5"
     assert hass.states.get("sensor.edookit_petr_novak_last_grade").state in {"1", "2", "3", "N", "Pouze komentář"}
     assert hass.states.get("sensor.edookit_petr_novak_grade_average").attributes["subjects"]["Matematika"] == 3.0
+
+    # Written tests from the timetable ("Pís." badges) reach the sensor and the calendars.
+    exams = hass.states.get("sensor.edookit_petr_novak_written_tests")
+    assert exams.state == "1"
+    assert exams.attributes["next"]["title"] == "Geometrické značky"
+    from homeassistant.util import dt as dt_util
+
+    agenda = hass.data["entity_components"]["calendar"].get_entity("calendar.edookit_petr_novak_school_agenda")
+    start = dt_util.parse_datetime("2026-09-28T00:00:00+02:00")
+    events = await agenda.async_get_events(hass, start, start + timedelta(days=7))
+    assert {e.summary for e in events} >= {
+        "📝 Pravopisné cvičení - září (Český jazyk a literatura)",
+        "📝 Geometrické značky (Seminář matematiky)",
+    }
 
     # The week is moved with relative steps and always reset back (2 weeks by default).
     timetable_requests = [p for p in requested if p.startswith("/timetable/?")]

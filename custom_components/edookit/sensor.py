@@ -15,7 +15,7 @@ from homeassistant.util import dt as dt_util
 from .const import CONF_PUBLIC_API, DEFAULT_PUBLIC_API
 from .coordinator import ChildRuntime, EdookitConfigEntry
 from .entity import EdookitEntity
-from .timeutil import compact, events_on, lesson_end, lesson_start, lessons_on, next_school_day
+from .timeutil import compact, events_on, lesson_end, lesson_start, lessons_on, next_school_day, timetable_exams
 
 LIST_LIMIT = 20
 
@@ -429,6 +429,18 @@ class ExamsSensor(_ListSensor):
     _attr_icon = "mdi:file-document-edit-outline"
     _list_key = "exams"
     _fields = ("title", "subject", "date", "description")
+
+    @property
+    def items(self) -> list[dict[str, Any]]:
+        """Tests from the exams page plus the "Pís." badges in the timetable."""
+        today = dt_util.now().date().isoformat()
+        lessons = (self.child.timetable.data or {}).get("lessons", [])
+        items = list(self.data.get("exams", []))
+        known = {(str(e.get("date"))[:10], e.get("title")) for e in items}
+        for exam in timetable_exams(lessons):
+            if exam["date"][:10] >= today and (exam["date"][:10], exam["title"]) not in known:
+                items.append(exam)
+        return sorted(items, key=lambda e: str(e.get("date") or "9999"))
 
     def __init__(self, entry: EdookitConfigEntry, child: ChildRuntime) -> None:
         super().__init__(entry, child, "exams")

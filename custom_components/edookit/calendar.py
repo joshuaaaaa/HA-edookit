@@ -12,7 +12,7 @@ from homeassistant.util import dt as dt_util
 
 from .coordinator import ChildRuntime, EdookitConfigEntry
 from .entity import EdookitEntity
-from .timeutil import lesson_end, lesson_start
+from .timeutil import lesson_end, lesson_start, timetable_exams
 
 
 async def async_setup_entry(
@@ -74,9 +74,11 @@ class TimetableCalendar(_BaseCalendar):
                 continue
             summary = lesson["subject"]
             if lesson.get("cancelled"):
-                summary = f"❌ {summary} (zrušeno)"
+                summary = f"❌ {summary} ({(lesson.get('status') or 'zrušeno').lower()})"
             elif lesson.get("changed"):
                 summary = f"⚠️ {summary} (změna)"
+            if lesson.get("exam"):
+                summary = f"📝 {summary} – písemka: {lesson['exam']}"
             details = [
                 f"{lesson['period']}. hodina" if lesson.get("period") else None,
                 f"Vyučující: {lesson['teacher']}" if lesson.get("teacher") else None,
@@ -150,11 +152,16 @@ class AgendaCalendar(_BaseCalendar):
                     hour, minute = map(int, ev["end_time"].split(":"))
                     end = start.replace(hour=hour, minute=minute)
             events.append(_event(ev["title"], start, end, description=ev.get("description") or None))
-        for exam in data.get("exams", []):
+        exams = list(data.get("exams", []))
+        known = {(str(e.get("date"))[:10], e.get("title")) for e in exams}
+        timetable = (self.child.timetable.data or {}).get("lessons", [])
+        exams += [e for e in timetable_exams(timetable) if (e["date"][:10], e["title"]) not in known]
+        for exam in exams:
             start = _parse_any(exam.get("date"))
             if start is not None:
                 title = f"📝 {exam['title']}" + (f" ({exam['subject']})" if exam.get("subject") else "")
-                events.append(_event(title, start, None, description=exam.get("description") or None))
+                end = _parse_any(exam.get("end"))
+                events.append(_event(title, start, end, description=exam.get("description") or None))
         for hw in data.get("assignments", []):
             start = _parse_any(hw.get("due"))
             if start is not None:
