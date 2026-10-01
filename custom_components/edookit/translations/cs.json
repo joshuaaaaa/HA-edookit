@@ -1,0 +1,245 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Přihlášení do Edookitu",
+        "description": "Přihlaste se stejným účtem, jakým se přihlašujete do Edookitu vaší školy (většinou e-mail a heslo Plus4U).",
+        "data": {
+          "school": "Škola",
+          "username": "E-mail / uživatelské jméno",
+          "password": "Heslo",
+          "login_method": "Způsob přihlášení",
+          "oidc_client_id": "Plus4U OIDC client id (pokročilé)"
+        },
+        "data_description": {
+          "school": "Subdoména nebo adresa portálu školy, např. `zs-priklad` nebo `https://zs-priklad.edookit.net`.",
+          "login_method": "Automaticky zkusí Plus4U i klasický přihlašovací formulář Edookitu.",
+          "oidc_client_id": "Nechte prázdné. Potřeba jen když selže automatické zjištění Plus4U (viz README)."
+        }
+      },
+      "reauth_confirm": {
+        "title": "Znovu přihlásit",
+        "description": "Edookit odmítl uložené heslo pro {username}. Zadejte aktuální heslo.",
+        "data": {
+          "password": "Heslo"
+        }
+      },
+      "reconfigure": {
+        "title": "Změnit účet Edookit",
+        "data": {
+          "school": "Škola",
+          "username": "E-mail / uživatelské jméno",
+          "password": "Heslo",
+          "login_method": "Způsob přihlášení",
+          "oidc_client_id": "Plus4U OIDC client id (pokročilé)"
+        }
+      }
+    },
+    "error": {
+      "invalid_school": "Neplatná adresa školy.",
+      "school_not_found": "Tato škola na edookit.net neexistuje.",
+      "invalid_auth": "Přihlášení selhalo. Zkontrolujte e-mail, heslo a způsob přihlášení.",
+      "cannot_connect": "Nelze se připojit k Edookitu.",
+      "unknown": "Neočekávaná chyba, podívejte se do logu."
+    },
+    "abort": {
+      "already_configured": "Tento účet už je nastavený.",
+      "reauth_successful": "Znovu přihlášeno.",
+      "reconfigure_successful": "Účet upraven."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Nastavení Edookitu",
+        "data": {
+          "timetable_update_time": "Čas denní aktualizace rozvrhu",
+          "scan_interval": "Interval aktualizace zpráv, známek a úkolů",
+          "timetable_weeks": "Počet načítaných týdnů rozvrhu",
+          "timetable_source": "Zdroj rozvrhu",
+          "fire_events": "Vyvolávat událost edookit_new_item (pro notifikace)",
+          "public_api": "Načítat veřejné akce školy a suplování",
+          "ical_url": "iCal adresa rozvrhu (volitelné)",
+          "api_username": "Uživatel REST API školy (volitelné)",
+          "api_password": "Heslo REST API školy (volitelné)",
+          "api_student_id": "ID žáka pro REST API (volitelné)",
+          "oidc_client_id": "Plus4U OIDC client id (pokročilé)"
+        },
+        "data_description": {
+          "timetable_update_time": "Rozvrh se stáhne jednou denně v tento čas (a také při startu Home Assistanta nebo stiskem tlačítka Aktualizovat).",
+          "scan_interval": "Minuty. 0 = jen jednou denně spolu s rozvrhem.",
+          "timetable_source": "Automaticky: REST API pokud je nastavené, jinak iCal adresa pokud je vyplněná, jinak webová stránka portálu.",
+          "ical_url": "Pokud škola poskytuje odkaz na kalendář (iCal/ICS) s rozvrhem, je to nejspolehlivější zdroj.",
+          "api_username": "Jen pokud vám škola dala přístup k REST API Edookitu (rodiče ho většinou nemají)."
+        }
+      }
+    }
+  },
+  "selector": {
+    "login_method": {
+      "options": {
+        "auto": "Automaticky",
+        "plus4u": "Plus4U (e-mail + heslo)",
+        "edookit": "Klasický formulář Edookitu"
+      }
+    },
+    "timetable_source": {
+      "options": {
+        "auto": "Automaticky",
+        "portal": "Webová stránka portálu",
+        "ical": "iCal adresa",
+        "api": "REST API"
+      }
+    },
+    "refresh_what": {
+      "options": {
+        "all": "Vše",
+        "timetable": "Jen rozvrh",
+        "data": "Jen zprávy, známky atd."
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "timetable": {
+        "name": "Rozvrh"
+      },
+      "lessons_tomorrow": {
+        "name": "Hodiny zítra"
+      },
+      "current_lesson": {
+        "name": "Aktuální hodina"
+      },
+      "next_lesson": {
+        "name": "Další hodina"
+      },
+      "school_start_today": {
+        "name": "Začátek vyučování dnes"
+      },
+      "school_end_today": {
+        "name": "Konec vyučování dnes"
+      },
+      "school_start_next": {
+        "name": "Začátek dalšího školního dne"
+      },
+      "timetable_changes": {
+        "name": "Změny v rozvrhu"
+      },
+      "unread": {
+        "name": "Nepřečtené"
+      },
+      "last_message": {
+        "name": "Poslední zpráva"
+      },
+      "last_grade": {
+        "name": "Poslední známka"
+      },
+      "grade_average": {
+        "name": "Průměr známek"
+      },
+      "homework": {
+        "name": "Domácí úkoly"
+      },
+      "exams": {
+        "name": "Písemky"
+      },
+      "events": {
+        "name": "Akce školy"
+      },
+      "action_required": {
+        "name": "Vyžaduje akci"
+      },
+      "public_events": {
+        "name": "Veřejné akce školy"
+      },
+      "substitutions": {
+        "name": "Suplování"
+      },
+      "absences": {
+        "name": "Absence"
+      },
+      "payments_due": {
+        "name": "Platby k úhradě"
+      },
+      "last_update": {
+        "name": "Poslední aktualizace"
+      }
+    },
+    "binary_sensor": {
+      "school_today": {
+        "name": "Škola dnes"
+      },
+      "school_tomorrow": {
+        "name": "Škola zítra"
+      },
+      "in_lesson": {
+        "name": "Probíhá hodina"
+      },
+      "has_unread": {
+        "name": "Nepřečtené zprávy"
+      }
+    },
+    "button": {
+      "refresh": {
+        "name": "Aktualizovat"
+      }
+    },
+    "calendar": {
+      "timetable_calendar": {
+        "name": "Rozvrh"
+      },
+      "agenda_calendar": {
+        "name": "Školní diář"
+      }
+    }
+  },
+  "services": {
+    "refresh": {
+      "name": "Aktualizovat",
+      "description": "Stáhne rozvrh a/nebo ostatní data z Edookitu hned teď.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Účet",
+          "description": "Účet Edookit (prázdné = všechny)."
+        },
+        "what": {
+          "name": "Co",
+          "description": "Co aktualizovat."
+        }
+      }
+    },
+    "get_timetable": {
+      "name": "Získat rozvrh",
+      "description": "Vrátí hodiny pro zadané období (z načtených týdnů).",
+      "fields": {
+        "config_entry_id": {
+          "name": "Účet",
+          "description": "Účet Edookit (prázdné = všechny)."
+        },
+        "start_date": {
+          "name": "Od",
+          "description": "První den (prázdné = dnes)."
+        },
+        "end_date": {
+          "name": "Do",
+          "description": "Poslední den (prázdné = stejné jako Od)."
+        }
+      }
+    },
+    "dump_pages": {
+      "name": "Uložit stránky portálu (ladění)",
+      "description": "Uloží HTML všech stránek Edookitu do /config/edookit_debug pro opravu parseru. Obsahuje osobní údaje!",
+      "fields": {
+        "config_entry_id": {
+          "name": "Účet",
+          "description": "Účet Edookit (prázdné = všechny)."
+        }
+      }
+    }
+  },
+  "exceptions": {
+    "entry_not_found": {
+      "message": "Žádný načtený účet Edookit neodpovídá."
+    }
+  }
+}

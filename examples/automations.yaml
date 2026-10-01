@@ -1,0 +1,50 @@
+# Example automations for the Edookit integration.
+
+# Wake-up alarm 70 minutes before the first lesson (works with a phone alarm,
+# a light, a speaker...). Uses the "Začátek vyučování dnes" timestamp sensor.
+- alias: "Škola – budíček před první hodinou"
+  triggers:
+    - trigger: template
+      value_template: >
+        {% set start = states('sensor.edookit_jan_novak_zacatek_vyucovani_dnes') %}
+        {{ start not in ['unknown', 'unavailable']
+           and now() >= as_datetime(start) - timedelta(minutes=70) }}
+  actions:
+    - action: light.turn_on
+      target:
+        entity_id: light.detsky_pokoj
+      data:
+        brightness_pct: 60
+
+# Evening reminder: tomorrow's subjects so the school bag gets packed.
+- alias: "Škola – co zabalit na zítra"
+  triggers:
+    - trigger: time
+      at: "19:00:00"
+  conditions:
+    - condition: state
+      entity_id: binary_sensor.edookit_jan_novak_skola_zitra
+      state: "on"
+  actions:
+    - action: notify.mobile_app_telefon
+      data:
+        title: "Zítra do školy"
+        message: >
+          {{ state_attr('sensor.edookit_jan_novak_hodiny_zitra', 'subjects') | join(', ') }}
+          {%- set hw = state_attr('sensor.edookit_jan_novak_domaci_ukoly', 'items') or [] %}
+          {%- if hw %}. Úkoly: {{ hw | map(attribute='title') | join(', ') }}{% endif %}
+
+# Announce new grades on a speaker.
+- alias: "Škola – nová známka"
+  triggers:
+    - trigger: event
+      event_type: edookit_new_item
+      event_data:
+        type: evaluation
+  actions:
+    - action: tts.speak
+      target:
+        entity_id: tts.google_translate_cs_cz
+      data:
+        media_player_entity_id: media_player.kuchyn
+        message: "Nová známka z předmětu {{ trigger.event.data.title }}: {{ trigger.event.data.grade }}"

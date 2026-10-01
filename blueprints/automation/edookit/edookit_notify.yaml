@@ -1,0 +1,64 @@
+blueprint:
+  name: Edookit – upozornění na novinky
+  description: >
+    Pošle notifikaci do mobilu, když v Edookitu přibude nová zpráva, známka,
+    domácí úkol, písemka, akce nebo anketa (událost `edookit_new_item`).
+  domain: automation
+  source_url: https://github.com/joshuaaaaa/HA-edookit/blob/main/blueprints/automation/edookit/edookit_notify.yaml
+  input:
+    notify_device:
+      name: Zařízení pro notifikace
+      description: Mobilní aplikace Home Assistant, kam se má notifikace poslat.
+      selector:
+        device:
+          filter:
+            - integration: mobile_app
+    types:
+      name: Typy novinek
+      default: [inboxMessage, evaluation, assignment, exam, event, poll, actionRequired]
+      selector:
+        select:
+          multiple: true
+          options:
+            - label: Zprávy
+              value: inboxMessage
+            - label: Známky / hodnocení
+              value: evaluation
+            - label: Domácí úkoly
+              value: assignment
+            - label: Písemky
+              value: exam
+            - label: Akce / události
+              value: event
+            - label: Ankety
+              value: poll
+            - label: Vyžaduje akci
+              value: actionRequired
+
+mode: queued
+max: 20
+
+trigger:
+  - platform: event
+    event_type: edookit_new_item
+
+condition:
+  - condition: template
+    value_template: "{{ trigger.event.data.type in types }}"
+
+variables:
+  types: !input types
+
+action:
+  - domain: mobile_app
+    type: notify
+    device_id: !input notify_device
+    title: >-
+      {{ trigger.event.data.type_label }}{% if trigger.event.data.student %} – {{ trigger.event.data.student }}{% endif %}
+    message: >-
+      {{ trigger.event.data.title }}{% if trigger.event.data.grade %}: {{ trigger.event.data.grade }}{% endif %}
+      {%- if trigger.event.data.creator %} ({{ trigger.event.data.creator }}){% endif %}
+    data:
+      url: "{{ trigger.event.data.url }}"
+      clickAction: "{{ trigger.event.data.url }}"
+      group: edookit

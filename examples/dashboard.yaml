@@ -1,0 +1,71 @@
+# Example dashboard view for the Edookit integration.
+# Replace "jan_novak" with the name of your child's entities.
+title: Škola
+path: skola
+icon: mdi:school
+cards:
+  # Week timetable (switches to a day list on narrow screens)
+  - type: custom:edookit-timetable-card
+    entity: sensor.edookit_jan_novak_rozvrh
+    title: Rozvrh
+    view: auto
+    show_room: true
+    show_teacher: false
+    next_week_from: friday_after_school
+    # Optional fixed colours per subject:
+    # subject_colors:
+    #   Matematika: "#7e57c2"
+    #   Český jazyk: "#ef6c00"
+
+  # Today / tomorrow summary
+  - type: entities
+    title: Dnes a zítra
+    entities:
+      - entity: binary_sensor.edookit_jan_novak_skola_dnes
+      - entity: sensor.edookit_jan_novak_aktualni_hodina
+      - entity: sensor.edookit_jan_novak_dalsi_hodina
+      - entity: sensor.edookit_jan_novak_konec_vyucovani_dnes
+      - entity: sensor.edookit_jan_novak_zacatek_dalsiho_skolniho_dne
+      - entity: sensor.edookit_jan_novak_zmeny_v_rozvrhu
+
+  # Grades, homework, messages
+  - type: entities
+    title: Novinky
+    entities:
+      - entity: sensor.edookit_jan_novak_neprectene
+      - entity: sensor.edookit_jan_novak_posledni_zprava
+      - entity: sensor.edookit_jan_novak_posledni_znamka
+      - entity: sensor.edookit_jan_novak_prumer_znamek
+      - entity: sensor.edookit_jan_novak_domaci_ukoly
+      - entity: sensor.edookit_jan_novak_pisemky
+      - entity: sensor.edookit_jan_novak_akce_skoly
+      - entity: sensor.edookit_jan_novak_vyzaduje_akci
+      - entity: sensor.edookit_jan_novak_platby_k_uhrade
+      - entity: button.edookit_jan_novak_aktualizovat
+
+  # Homework list rendered from the sensor attributes
+  - type: markdown
+    title: Domácí úkoly
+    content: >
+      {% set items = state_attr('sensor.edookit_jan_novak_domaci_ukoly', 'items') or [] %}
+      {% for i in items %}
+      - **{{ i.title }}**{% if i.subject %} ({{ i.subject }}){% endif %}
+        {%- if i.due %} – do {{ as_timestamp(i.due) | timestamp_custom('%-d. %-m. %H:%M') }}{% endif %}
+      {% else %}
+      Žádné úkoly 🎉
+      {% endfor %}
+
+  # Grade averages per subject
+  - type: markdown
+    title: Průměry
+    content: >
+      {% for subject, avg in (state_attr('sensor.edookit_jan_novak_prumer_znamek', 'subjects') or {}).items() %}
+      | {{ subject }} | **{{ avg }}** |
+      {% endfor %}
+
+  # Agenda: events, written tests, homework deadlines
+  - type: calendar
+    initial_view: listWeek
+    entities:
+      - calendar.edookit_jan_novak_skolni_diar
+      - calendar.edookit_jan_novak_rozvrh

@@ -1,0 +1,245 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Edookit login",
+        "description": "Log in with the same account you use on your school's Edookit portal (usually a Plus4U e-mail and password).",
+        "data": {
+          "school": "School",
+          "username": "E-mail / username",
+          "password": "Password",
+          "login_method": "Login method",
+          "oidc_client_id": "Plus4U OIDC client id (advanced)"
+        },
+        "data_description": {
+          "school": "Subdomain or address of your school's portal, e.g. `zs-example` or `https://zs-example.edookit.net`.",
+          "login_method": "Automatic tries Plus4U and the classic Edookit login form.",
+          "oidc_client_id": "Leave empty. Only needed if automatic Plus4U discovery fails (see README)."
+        }
+      },
+      "reauth_confirm": {
+        "title": "Log in again",
+        "description": "Edookit refused the saved password for {username}. Enter the current password.",
+        "data": {
+          "password": "Password"
+        }
+      },
+      "reconfigure": {
+        "title": "Change Edookit account",
+        "data": {
+          "school": "School",
+          "username": "E-mail / username",
+          "password": "Password",
+          "login_method": "Login method",
+          "oidc_client_id": "Plus4U OIDC client id (advanced)"
+        }
+      }
+    },
+    "error": {
+      "invalid_school": "Invalid school address.",
+      "school_not_found": "This school was not found on edookit.net.",
+      "invalid_auth": "Login failed. Check the e-mail and password (and the login method).",
+      "cannot_connect": "Cannot connect to Edookit.",
+      "unknown": "Unexpected error, see the log."
+    },
+    "abort": {
+      "already_configured": "This account is already configured.",
+      "reauth_successful": "Logged in again.",
+      "reconfigure_successful": "Account updated."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Edookit options",
+        "data": {
+          "timetable_update_time": "Daily timetable update time",
+          "scan_interval": "Refresh interval for messages, grades and homework",
+          "timetable_weeks": "Weeks of timetable to load",
+          "timetable_source": "Timetable source",
+          "fire_events": "Fire edookit_new_item events (for notifications)",
+          "public_api": "Load public school events and substitutions",
+          "ical_url": "Timetable iCal URL (optional)",
+          "api_username": "School REST API username (optional)",
+          "api_password": "School REST API password (optional)",
+          "api_student_id": "Student id for the REST API (optional)",
+          "oidc_client_id": "Plus4U OIDC client id (advanced)"
+        },
+        "data_description": {
+          "timetable_update_time": "The timetable is downloaded once a day at this time (and when Home Assistant starts or you press Refresh).",
+          "scan_interval": "Minutes. 0 = only once a day together with the timetable.",
+          "timetable_source": "Automatic: REST API if configured, otherwise iCal URL if set, otherwise the portal web page.",
+          "ical_url": "If your school provides a calendar (iCal/ICS) link with the timetable, it is the most reliable source.",
+          "api_username": "Only if your school gave you credentials for the Edookit REST API (most parents do not have them)."
+        }
+      }
+    }
+  },
+  "selector": {
+    "login_method": {
+      "options": {
+        "auto": "Automatic",
+        "plus4u": "Plus4U (e-mail + password)",
+        "edookit": "Classic Edookit login form"
+      }
+    },
+    "timetable_source": {
+      "options": {
+        "auto": "Automatic",
+        "portal": "Portal web page",
+        "ical": "iCal URL",
+        "api": "REST API"
+      }
+    },
+    "refresh_what": {
+      "options": {
+        "all": "Everything",
+        "timetable": "Timetable only",
+        "data": "Messages, grades etc. only"
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "timetable": {
+        "name": "Timetable"
+      },
+      "lessons_tomorrow": {
+        "name": "Lessons tomorrow"
+      },
+      "current_lesson": {
+        "name": "Current lesson"
+      },
+      "next_lesson": {
+        "name": "Next lesson"
+      },
+      "school_start_today": {
+        "name": "School starts today"
+      },
+      "school_end_today": {
+        "name": "School ends today"
+      },
+      "school_start_next": {
+        "name": "Next school day start"
+      },
+      "timetable_changes": {
+        "name": "Timetable changes"
+      },
+      "unread": {
+        "name": "Unread notifications"
+      },
+      "last_message": {
+        "name": "Last message"
+      },
+      "last_grade": {
+        "name": "Last grade"
+      },
+      "grade_average": {
+        "name": "Grade average"
+      },
+      "homework": {
+        "name": "Homework"
+      },
+      "exams": {
+        "name": "Written tests"
+      },
+      "events": {
+        "name": "School events"
+      },
+      "action_required": {
+        "name": "Requires action"
+      },
+      "public_events": {
+        "name": "Public school events"
+      },
+      "substitutions": {
+        "name": "Substitutions"
+      },
+      "absences": {
+        "name": "Absences"
+      },
+      "payments_due": {
+        "name": "Payments due"
+      },
+      "last_update": {
+        "name": "Last update"
+      }
+    },
+    "binary_sensor": {
+      "school_today": {
+        "name": "School today"
+      },
+      "school_tomorrow": {
+        "name": "School tomorrow"
+      },
+      "in_lesson": {
+        "name": "In lesson"
+      },
+      "has_unread": {
+        "name": "Unread notifications"
+      }
+    },
+    "button": {
+      "refresh": {
+        "name": "Refresh"
+      }
+    },
+    "calendar": {
+      "timetable_calendar": {
+        "name": "Timetable"
+      },
+      "agenda_calendar": {
+        "name": "School agenda"
+      }
+    }
+  },
+  "services": {
+    "refresh": {
+      "name": "Refresh",
+      "description": "Download the timetable and/or other data from Edookit now.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Account",
+          "description": "Edookit account (all when empty)."
+        },
+        "what": {
+          "name": "What",
+          "description": "What to refresh."
+        }
+      }
+    },
+    "get_timetable": {
+      "name": "Get timetable",
+      "description": "Return lessons for a date range (from the loaded weeks).",
+      "fields": {
+        "config_entry_id": {
+          "name": "Account",
+          "description": "Edookit account (all when empty)."
+        },
+        "start_date": {
+          "name": "From",
+          "description": "First day (today when empty)."
+        },
+        "end_date": {
+          "name": "To",
+          "description": "Last day (same as From when empty)."
+        }
+      }
+    },
+    "dump_pages": {
+      "name": "Save portal pages (debug)",
+      "description": "Save the HTML of all Edookit pages to /config/edookit_debug to help fix parsing. Contains personal data!",
+      "fields": {
+        "config_entry_id": {
+          "name": "Account",
+          "description": "Edookit account (all when empty)."
+        }
+      }
+    }
+  },
+  "exceptions": {
+    "entry_not_found": {
+      "message": "No loaded Edookit account matches."
+    }
+  }
+}

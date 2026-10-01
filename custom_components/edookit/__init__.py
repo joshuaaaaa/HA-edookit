@@ -1,0 +1,224 @@
+"""Edookit (Czech school information system) integration for Home Assistant."""
+
+from __future__ import annotations
+
+from datetime import date, datetime, time
+import logging
+from pathlib import Path
+import re
+from typing import Any
+
+import aiohttp
+from homeassistant.components.frontend import add_extra_js_url
+from homeassistant.components.http import StaticPathConfig
+from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import CONF_PASSWORD, CONF_USERNAME, Platform
+from homeassistant.core import HomeAssistant, ServiceCall, ServiceResponse, SupportsResponse, callback
+from homeassistant.exceptions import ServiceValidationError
+from homeassistant.helpers import config_validation as cv
+from homeassistant.helpers.aiohttp_client import async_create_clientsession
+from homeassistant.helpers.event import async_track_time_change
+from homeassistant.helpers.storage import Store
+from homeassistant.helpers.typing import ConfigType
+from homeassistant.util import dt as dt_util
+import voluptuous as vol
+
+from .api import EdookitClient
+from .const import (
+    CARD_FILENAME,
+    CARD_URL,
+    CONF_API_PASSWORD,
+    CONF_API_USERNAME,
+    CONF_LOGIN_METHOD,
+    CONF_OIDC_CLIENT_ID,
+    CONF_SCHOOL,
+    CONF_TIMETABLE_TIME,
+    DEFAULT_TIMETABLE_TIME,
+    DOMAIN,
+    LOGIN_AUTO,
+    SERVICE_DUMP_PAGES,
+    SERVICE_GET_TIMETABLE,
+    SERVICE_REFRESH,
+    STORAGE_VERSION,
+    VERSION,
+)
+from .coordinator import (
+    PAGES,
+    EdookitConfigEntry,
+    EdookitDataCoordinator,
+    EdookitRuntimeData,
+    TimetableCoordinator,
+)
+
+_LOGGER = logging.getLogger(__name__)
+
+PLATFORMS = [Platform.BINARY_SENSOR, Platform.BUTTON, Platform.CALENDAR, Platform.SENSOR]
+CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
+
+ATTR_ENTRY_ID = "config_entry_id"
+ATTR_WHAT = "what"
+ATTR_START = "start_date"
+ATTR_END = "end_date"
+
+
+def parse_time_option(value: str | None) -> time:
+    """Parse ``HH:MM[:SS]`` (falls back to the default)."""
+    match = re.fullmatch(r"(\d{1,2}):(\d{2})(?::(\d{2}))?", (value or "").strip())
+    if not match:
+        return parse_time_option(DEFAULT_TIMETABLE_TIME)
+    return time(int(match.group(1)), int(match.group(2)), int(match.group(3) or 0))
+
+
+async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
+    """Register the timetable card and the services."""
+    if hass.http is not None:
+        card_path = Path(__file__).parent / "frontend" / CARD_FILENAME
+        await hass.http.async_register_static_paths([StaticPathConfig(CARD_URL, str(card_path), False)])
+        if "frontend" in hass.config.components:
+            # Loads the card on every dashboard; no manual resource needed.
+            add_extra_js_url(hass, f"{CARD_URL}?v={VERSION}")
+    _register_services(hass)
+    return True
+
+
+async def async_setup_entry(hass: HomeAssistant, entry: EdookitConfigEntry) -> bool:
+    """Set up Edookit from a config entry."""
+    session = async_create_clientsession(hass, cookie_jar=aiohttp.CookieJar())
+    client = EdookitClient(
+        session,
+        entry.data[CONF_SCHOOL],
+        entry.data[CONF_USERNAME],
+        entry.data[CONF_PASSWORD],
+        entry.data.get(CONF_LOGIN_METHOD, LOGIN_AUTO),
+        oidc_client_id=entry.options.get(CONF_OIDC_CLIENT_ID) or entry.data.get(CONF_OIDC_CLIENT_ID),
+        api_username=entry.options.get(CONF_API_USERNAME),
+        api_password=entry.options.get(CONF_API_PASSWORD),
+    )
+    store: Store = Store(hass, STORAGE_VERSION, f"{DOMAIN}.{entry.entry_id}", private=True)
+    stored: dict[str, Any] = await store.async_load() or {}
+    client.import_cookies(stored.get("cookies"))
+
+    timetable = TimetableCoordinator(hass, entry, client, store, stored)
+    data = EdookitDataCoordinator(hass, entry, client, store, stored)
+
+    # Data first: it logs in and learns the student's name.
+    await data.async_config_entry_first_refresh()
+    await timetable.async_config_entry_first_refresh()
+
+    entry.runtime_data = EdookitRuntimeData(client, store, stored, timetable, data)
+
+    when = parse_time_option(entry.options.get(CONF_TIMETABLE_TIME, DEFAULT_TIMETABLE_TIME))
+
+    @callback
+    def _daily_refresh(now: datetime) -> None:
+        _LOGGER.debug("Scheduled daily Edookit refresh")
+        hass.async_create_task(timetable.async_request_refresh())
+        if data.update_interval is None:
+            hass.async_create_task(data.async_request_refresh())
+
+    entry.async_on_unload(
+        async_track_time_change(hass, _daily_refresh, hour=when.hour, minute=when.minute, second=when.second)
+    )
+    entry.async_on_unload(entry.add_update_listener(_async_options_updated))
+
+    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+    return True
+
+
+async def _async_options_updated(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    await hass.config_entries.async_reload(entry.entry_id)
+
+
+async def async_unload_entry(hass: HomeAssistant, entry: EdookitConfigEntry) -> bool:
+    """Unload a config entry."""
+    if unloaded := await hass.config_entries.async_unload_platforms(entry, PLATFORMS):
+        await entry.runtime_data.store.async_save(entry.runtime_data.stored)
+    return unloaded
+
+
+async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Delete stored cookies when the entry is removed."""
+    await Store(hass, STORAGE_VERSION, f"{DOMAIN}.{entry.entry_id}").async_remove()
+
+
+# ------------------------------------------------------------------ services
+
+
+def _entries(hass: HomeAssistant, call: ServiceCall) -> list[EdookitConfigEntry]:
+    entry_id = call.data.get(ATTR_ENTRY_ID)
+    entries = [
+        e for e in hass.config_entries.async_loaded_entries(DOMAIN) if entry_id is None or e.entry_id == entry_id
+    ]
+    if not entries:
+        raise ServiceValidationError(translation_domain=DOMAIN, translation_key="entry_not_found")
+    return entries
+
+
+def _register_services(hass: HomeAssistant) -> None:
+    async def refresh(call: ServiceCall) -> None:
+        what = call.data[ATTR_WHAT]
+        for entry in _entries(hass, call):
+            if what in ("all", "timetable"):
+                await entry.runtime_data.timetable.async_refresh()
+            if what in ("all", "data"):
+                await entry.runtime_data.data.async_refresh()
+
+    async def dump_pages(call: ServiceCall) -> ServiceResponse:
+        folder = Path(hass.config.path("edookit_debug"))
+        written: list[str] = []
+        for entry in _entries(hass, call):
+            client = entry.runtime_data.client
+            for key, path in {**PAGES, "timetable": "/timetable/"}.items():
+                try:
+                    html = await client.async_get_page(path)
+                except Exception as err:
+                    html = f"<!-- error: {err} -->"
+                target = folder / client.school / f"{key}.html"
+
+                def _write(target: Path = target, html: str = html) -> None:
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    target.write_text(html, encoding="utf-8")
+
+                await hass.async_add_executor_job(_write)
+                written.append(str(target))
+        _LOGGER.warning(
+            "Edookit pages saved to %s. They contain personal data - anonymise them before sharing",
+            folder,
+        )
+        return {"files": written}
+
+    async def get_timetable(call: ServiceCall) -> ServiceResponse:
+        start: date = call.data.get(ATTR_START) or dt_util.now().date()
+        end: date = call.data.get(ATTR_END) or start
+        result = {}
+        for entry in _entries(hass, call):
+            lessons = entry.runtime_data.timetable.data.get("lessons", [])
+            result[entry.entry_id] = {
+                "student": entry.runtime_data.data.student,
+                "lessons": [ls for ls in lessons if start.isoformat() <= ls["date"] <= end.isoformat()],
+            }
+        return result
+
+    entry_schema = {vol.Optional(ATTR_ENTRY_ID): cv.string}
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_REFRESH,
+        refresh,
+        schema=vol.Schema(
+            {**entry_schema, vol.Optional(ATTR_WHAT, default="all"): vol.In(["all", "timetable", "data"])}
+        ),
+    )
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_DUMP_PAGES,
+        dump_pages,
+        schema=vol.Schema(entry_schema),
+        supports_response=SupportsResponse.OPTIONAL,
+    )
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_GET_TIMETABLE,
+        get_timetable,
+        schema=vol.Schema({**entry_schema, vol.Optional(ATTR_START): cv.date, vol.Optional(ATTR_END): cv.date}),
+        supports_response=SupportsResponse.ONLY,
+    )

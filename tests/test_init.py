@@ -1,0 +1,227 @@
+"""Integration tests: config flow, setup, entities, services and events."""
+
+from __future__ import annotations
+
+from unittest.mock import AsyncMock, patch
+
+from freezegun.api import FrozenDateTimeFactory
+from homeassistant import config_entries
+from homeassistant.config_entries import ConfigEntryState
+from homeassistant.core import HomeAssistant
+from homeassistant.data_entry_flow import FlowResultType
+import pytest
+from pytest_homeassistant_custom_component.common import (
+    MockConfigEntry,
+    async_capture_events,
+    async_fire_time_changed,
+)
+
+from custom_components.edookit.api import EdookitAuthError
+from custom_components.edookit.const import DOMAIN, EVENT_NEW_ITEM
+from custom_components.edookit.diagnostics import async_get_config_entry_diagnostics
+
+from .conftest import load
+
+PAGES = {
+    "/": "dashboard.html",
+    "/overview/updates": "inbox.html",
+    "/evaluation/list": "evaluation_list.html",
+    "/timetable/upcoming": "upcoming.html",
+    "/payments/": "payments.html",
+}
+
+ENTRY_DATA = {"school": "skola", "username": "rodic@example.com", "password": "secret", "login_method": "auto"}
+
+
+@pytest.fixture
+def pages() -> dict[str, str]:
+    return {path: load(name) for path, name in PAGES.items()}
+
+
+@pytest.fixture
+def mock_client(pages):
+    async def get_page(self, path: str) -> str:
+        return pages.get(path, "<html><body></body></html>")
+
+    async def login(self) -> None:
+        self.logged_in = True
+        self.used_login_method = "plus4u"
+
+    with (
+        patch("custom_components.edookit.api.EdookitClient.async_login", login),
+        patch("custom_components.edookit.api.EdookitClient.async_get_page", get_page),
+        patch(
+            "custom_components.edookit.api.EdookitClient.async_get_timetable_pages",
+            AsyncMock(return_value=[load("timetable_grid.html")]),
+        ),
+    ):
+        yield
+
+
+async def _setup(hass: HomeAssistant, freezer: FrozenDateTimeFactory) -> MockConfigEntry:
+    await hass.config.async_set_time_zone("Europe/Prague")
+    freezer.move_to("2026-09-28 08:10:00+02:00")
+    entry = MockConfigEntry(domain=DOMAIN, data=ENTRY_DATA, title="Jan Novák", unique_id="skola:rodic@example.com")
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    return entry
+
+
+async def test_config_flow_creates_entry(hass: HomeAssistant) -> None:
+    result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": config_entries.SOURCE_USER})
+    assert result["type"] is FlowResultType.FORM
+    with (
+        patch(
+            "custom_components.edookit.config_flow.validate_login",
+            AsyncMock(return_value={"school": "skola", "student": "Jan Novák", "method": "plus4u"}),
+        ),
+        patch("custom_components.edookit.async_setup_entry", AsyncMock(return_value=True)),
+    ):
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"],
+            {**ENTRY_DATA, "school": "https://skola.edookit.net/"},
+        )
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert result["title"] == "Jan Novák"
+    assert result["data"]["school"] == "skola"
+
+
+async def test_config_flow_errors(hass: HomeAssistant) -> None:
+    result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": config_entries.SOURCE_USER})
+    result = await hass.config_entries.flow.async_configure(result["flow_id"], {**ENTRY_DATA, "school": "bad school!"})
+    assert result["errors"] == {"school": "invalid_school"}
+    with patch("custom_components.edookit.config_flow.validate_login", AsyncMock(side_effect=EdookitAuthError("no"))):
+        result = await hass.config_entries.flow.async_configure(result["flow_id"], ENTRY_DATA)
+    assert result["errors"] == {"base": "invalid_auth"}
+
+
+async def test_setup_entities(hass: HomeAssistant, freezer: FrozenDateTimeFactory, mock_client) -> None:
+    entry = await _setup(hass, freezer)
+    assert entry.state is ConfigEntryState.LOADED
+
+    timetable = hass.states.get("sensor.edookit_jan_novak_timetable")
+    assert timetable.state == "2"
+    assert timetable.attributes["student"] == "Jan Novák"
+    assert timetable.attributes["source"] == "portal"
+    days = timetable.attributes["days"]
+    assert [d["date"] for d in days[:5]] == ["2026-09-28", "2026-09-29", "2026-09-30", "2026-10-01", "2026-10-02"]
+    assert days[0]["weekday_short"] == "Po"
+    assert [ls["subject"] for ls in days[0]["lessons"]] == ["M", "ČJ"]
+    assert timetable.attributes["bell"][0] == {"period": 1, "start": "08:00", "end": "08:45"}
+
+    assert hass.states.get("sensor.edookit_jan_novak_current_lesson").state == "M"
+    assert hass.states.get("sensor.edookit_jan_novak_next_lesson").state == "ČJ"
+    assert hass.states.get("binary_sensor.edookit_jan_novak_school_today").state == "on"
+    assert hass.states.get("binary_sensor.edookit_jan_novak_in_lesson").state == "on"
+    # Tuesday: AJ is cancelled, only PŘ remains.
+    assert hass.states.get("sensor.edookit_jan_novak_lessons_tomorrow").state == "1"
+    assert hass.states.get("sensor.edookit_jan_novak_timetable_changes").state == "2"
+    assert hass.states.get("sensor.edookit_jan_novak_school_starts_today").state == "2026-09-28T06:00:00+00:00"
+
+    assert hass.states.get("sensor.edookit_jan_novak_unread_notifications").state == "2"
+    assert hass.states.get("sensor.edookit_jan_novak_last_message").state == "Třídní schůzky"
+    assert hass.states.get("sensor.edookit_jan_novak_last_grade").state == "3"  # "Včera" is the newest
+    assert float(hass.states.get("sensor.edookit_jan_novak_grade_average").state) == pytest.approx(2.08, 0.01)
+    assert hass.states.get("sensor.edookit_jan_novak_school_events").state == "2"
+    assert hass.states.get("sensor.edookit_jan_novak_requires_action").state == "2"
+    assert float(hass.states.get("sensor.edookit_jan_novak_payments_due").state) == 1250.0
+
+    cal = hass.states.get("calendar.edookit_jan_novak_timetable")
+    assert cal.attributes["message"] == "M"
+
+    response = await hass.services.async_call(
+        DOMAIN,
+        "get_timetable",
+        {"start_date": "2026-09-29", "end_date": "2026-09-29"},
+        blocking=True,
+        return_response=True,
+    )
+    lessons = response[entry.entry_id]["lessons"]
+    assert [ls["subject"] for ls in lessons] == ["AJ", "PŘ"]
+
+    diag = await async_get_config_entry_diagnostics(hass, entry)
+    assert diag["entry"]["data"]["password"] == "**REDACTED**"
+    assert diag["timetable"]["lessons"] == 4
+
+    # Minutes later the current lesson changes without any download.
+    freezer.move_to("2026-09-28 09:00:00+02:00")
+    async_fire_time_changed(hass)
+    await hass.async_block_till_done()
+    assert hass.states.get("sensor.edookit_jan_novak_current_lesson").state == "ČJ"
+    assert await hass.config_entries.async_unload(entry.entry_id)
+
+
+async def test_new_item_event(hass: HomeAssistant, freezer: FrozenDateTimeFactory, mock_client, pages) -> None:
+    entry = await _setup(hass, freezer)
+    events = async_capture_events(hass, EVENT_NEW_ITEM)
+
+    # Nothing is announced for items that were already there at setup.
+    await entry.runtime_data.data.async_refresh()
+    await hass.async_block_till_done()
+    assert events == []
+
+    pages["/overview/updates"] = pages["/overview/updates"].replace(
+        '<div class="items">',
+        '<div class="items"><div class="item exam unread" onclick=\'window.location.href="/exams/detail?exam=5"\'>'
+        '<div class="object-name">Písemka z matematiky</div><div class="creator">Dvořák</div>'
+        '<div class="time">Dnes, 9:00</div></div>',
+    )
+    await entry.runtime_data.data.async_refresh()
+    await hass.async_block_till_done()
+    assert len(events) == 1
+    assert events[0].data["type"] == "exam"
+    assert events[0].data["title"] == "Písemka z matematiky"
+    assert events[0].data["url"] == "https://skola.edookit.net/exams/detail?exam=5"
+
+
+async def test_auth_failure_starts_reauth(hass: HomeAssistant, freezer: FrozenDateTimeFactory) -> None:
+    await hass.config.async_set_time_zone("Europe/Prague")
+    entry = MockConfigEntry(domain=DOMAIN, data=ENTRY_DATA, title="Jan Novák")
+    entry.add_to_hass(hass)
+    with patch(
+        "custom_components.edookit.api.EdookitClient.async_get_page",
+        AsyncMock(side_effect=EdookitAuthError("bad password")),
+    ):
+        await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+    assert entry.state is ConfigEntryState.SETUP_ERROR
+    flows = hass.config_entries.flow.async_progress()
+    assert flows and flows[0]["context"]["source"] == "reauth"
+
+
+async def test_options_flow(hass: HomeAssistant, freezer: FrozenDateTimeFactory, mock_client) -> None:
+    entry = await _setup(hass, freezer)
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    assert result["type"] is FlowResultType.FORM
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        {
+            "timetable_update_time": "06:30:00",
+            "scan_interval": 30,
+            "timetable_weeks": 1,
+            "timetable_source": "portal",
+            "fire_events": False,
+            "public_api": False,
+        },
+    )
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    await hass.async_block_till_done()
+    assert entry.options["timetable_update_time"] == "06:30:00"
+    assert entry.options["ical_url"] == ""
+    assert entry.state is ConfigEntryState.LOADED
+    assert entry.runtime_data.data.update_interval.total_seconds() == 1800
+
+
+async def test_reauth_flow(hass: HomeAssistant, freezer: FrozenDateTimeFactory, mock_client) -> None:
+    entry = await _setup(hass, freezer)
+    result = await entry.start_reauth_flow(hass)
+    assert result["step_id"] == "reauth_confirm"
+    with patch(
+        "custom_components.edookit.config_flow.validate_login",
+        AsyncMock(return_value={"school": "skola", "student": "Jan Novák", "method": "plus4u"}),
+    ):
+        result = await hass.config_entries.flow.async_configure(result["flow_id"], {"password": "new"})
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "reauth_successful"
+    assert entry.data["password"] == "new"
