@@ -15,7 +15,7 @@ from homeassistant.util import dt as dt_util
 from .const import CONF_PUBLIC_API, DEFAULT_PUBLIC_API
 from .coordinator import ChildRuntime, EdookitConfigEntry
 from .entity import EdookitEntity
-from .timeutil import compact, lesson_end, lesson_start, lessons_on, next_school_day
+from .timeutil import compact, events_on, lesson_end, lesson_start, lessons_on, next_school_day
 
 LIST_LIMIT = 20
 
@@ -100,10 +100,13 @@ class TimetableSensor(_TimetableBase):
         data = self.coordinator.data or {}
         return {
             "student": self.child.name,
+            "class_name": (self.child.data.data or {}).get("class_name"),
+            "class_teacher": (self.child.data.data or {}).get("class_teacher"),
             "source": data.get("source"),
             "week_start": data.get("week_start"),
             "last_update": data.get("updated"),
             "today": [compact(ls) for ls in lessons_on(self.lessons, dt_util.now().date(), True)],
+            "today_events": [ev["subject"] for ev in events_on(self.lessons, dt_util.now().date())],
             "bell": data.get("bell", []),
             "days": data.get("days", []),
         }
@@ -131,6 +134,7 @@ class LessonsTomorrowSensor(_TimetableBase):
             "lessons": [compact(ls) for ls in lessons_on(self.lessons, tomorrow, True)],
             "next_school_day": nxt.isoformat() if nxt else None,
             "subjects": sorted({ls["subject"] for ls in lessons_on(self.lessons, tomorrow)}),
+            "events": [ev["subject"] for ev in events_on(self.lessons, tomorrow)],
         }
 
 
@@ -495,13 +499,18 @@ class AbsencesSensor(_DataBase):
 
     @property
     def native_value(self) -> int:
-        return len(self.data.get("attendance", {}).get("records", []))
+        attendance = self.data.get("attendance", {})
+        # Per-child dashboard summary (e.g. {"Absence omluvená": 5}) beats the shared list.
+        if attendance.get("summary"):
+            return sum(attendance["summary"].values())
+        return len(attendance.get("records", []))
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         attendance = self.data.get("attendance", {})
         return {
-            "unexcused": attendance.get("unexcused", 0),
+            "summary": attendance.get("summary", {}),
+            "unexcused": attendance.get("summary", {}).get("Absence neomluvená", attendance.get("unexcused", 0)),
             "stats": attendance.get("stats", {}),
             "records": [
                 {k: r.get(k) for k in ("date", "lesson", "subject", "status", "excuse") if r.get(k)}

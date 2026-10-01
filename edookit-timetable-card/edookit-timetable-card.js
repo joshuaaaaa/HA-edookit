@@ -207,13 +207,21 @@ class EdookitTimetableCard extends HTMLElement {
     const known = new Set(bell.map((b) => b.period));
     for (const day of days)
       for (const l of day.lessons || [])
-        if (l.period && !known.has(l.period)) {
+        if (l.period && l.kind !== "event" && !known.has(l.period)) {
           known.add(l.period);
           bell.push({ period: l.period, start: l.start, end: l.end });
         }
     bell.sort((a, b) => a.period - b.period);
     // Hide trailing/leading periods that are empty in the shown week.
-    const used = new Set(days.flatMap((d) => (d.lessons || []).map((l) => l.period)));
+    const used = new Set(
+      days.flatMap((d) =>
+        (d.lessons || []).flatMap((l) =>
+          l.kind === "event" && l.period_end
+            ? Array.from({ length: l.period_end - l.period + 1 }, (_, i) => l.period + i)
+            : [l.period]
+        )
+      )
+    );
     const usedList = bell.filter((b) => used.has(b.period));
     if (!usedList.length) return [];
     const first = usedList[0].period;
@@ -248,6 +256,7 @@ class EdookitTimetableCard extends HTMLElement {
     const meta = [];
     if (this._config.show_room && lesson.room) meta.push(`<span class="room">${escapeHtml(lesson.room)}</span>`);
     if (this._config.show_teacher && lesson.teacher) meta.push(`<span class="teacher">${escapeHtml(lesson.teacher)}</span>`);
+    if (wide && lesson.topic) meta.push(`<span class="topic">${escapeHtml(lesson.topic)}</span>`);
     if (wide && (lesson.cancelled || lesson.changed))
       meta.push(`<span class="badge">${lesson.cancelled ? this._t.cancelled : this._t.changed}</span>`);
     const tooltip = [
@@ -257,6 +266,7 @@ class EdookitTimetableCard extends HTMLElement {
       lesson.teacher,
       lesson.group,
       lesson.cancelled ? this._t.cancelled : lesson.changed ? this._t.changed : "",
+      lesson.topic && `Učivo: ${lesson.topic}`,
       lesson.note,
     ]
       .filter(Boolean)
@@ -288,12 +298,31 @@ class EdookitTimetableCard extends HTMLElement {
     const rows = days
       .map((day) => {
         const d = new Date(`${day.date}T12:00:00`);
-        const cells = periods
-          .map((p) => {
-            const lessons = (day.lessons || []).filter((l) => l.period === p.period);
-            return `<div class="cell">${lessons.map((l) => this._lessonHtml(l, day.date, compact)).join("")}</div>`;
-          })
-          .join("");
+        const all = day.lessons || [];
+        const lessonsOnly = all.filter((l) => l.kind !== "event");
+        const wholeDay = all.filter((l) => l.kind === "event" && (l.all_day || !l.period));
+        let cells = "";
+        if (wholeDay.length && !lessonsOnly.some((l) => !l.cancelled)) {
+          // Holiday / day off: one banner across the whole row.
+          cells = `<div class="cell" style="grid-column: span ${periods.length}">${wholeDay
+            .map((ev) => this._eventHtml(ev))
+            .join("")}</div>`;
+        } else {
+          for (let i = 0; i < periods.length; i++) {
+            const p = periods[i];
+            const ev = all.find((l) => l.kind === "event" && !l.all_day && l.period === p.period);
+            if (ev) {
+              // Trip / project day covering several periods.
+              const last = periods.findIndex((x) => x.period === (ev.period_end || ev.period));
+              const span = Math.max(1, (last < 0 ? i : last) - i + 1);
+              cells += `<div class="cell" style="grid-column: span ${span}">${this._eventHtml(ev)}</div>`;
+              i += span - 1;
+              continue;
+            }
+            const lessons = lessonsOnly.filter((l) => l.period === p.period);
+            cells += `<div class="cell">${lessons.map((l) => this._lessonHtml(l, day.date, compact)).join("")}</div>`;
+          }
+        }
         return `<div class="dh ${day.date === today ? "today" : ""}">
             <div class="dn">${escapeHtml(day.weekday_short)}</div>
             <div class="dd">${d.getDate()}. ${d.getMonth() + 1}.</div>
@@ -306,12 +335,25 @@ class EdookitTimetableCard extends HTMLElement {
       </div></div>`;
   }
 
+  _eventHtml(ev) {
+    const when = ev.all_day ? "" : ev.start ? `${ev.start}–${ev.end || ""}` : "";
+    return `<div class="lesson event" title="${escapeHtml([ev.subject, when].filter(Boolean).join("\n"))}">
+        <div class="subject">★ ${escapeHtml(ev.subject)}</div>
+        ${when ? `<div class="meta">${when}</div>` : ""}
+      </div>`;
+  }
+
   _dayHtml(day) {
     const t = this._t;
     const lessons = day?.lessons || [];
     if (!lessons.length) return `<div class="empty">${t.free}</div>`;
     return `<div class="daylist">${lessons
       .map((l) => {
+        if (l.kind === "event")
+          return `<div class="row">
+            <div class="when"><div class="pt">${l.start ? `${l.start}<br>${l.end || ""}` : ""}</div></div>
+            ${this._eventHtml(l).replace('class="lesson event"', 'class="lesson event wide"')}
+          </div>`;
         const now = this._isNow(l, day.date);
         return `<div class="row ${now ? "is-now" : ""}">
           <div class="when">
@@ -378,7 +420,7 @@ class EdookitTimetableCard extends HTMLElement {
         const tomorrow = new Date();
         tomorrow.setDate(tomorrow.getDate() + 1);
         const rel = day.date === today ? t.today : day.date === isoDate(tomorrow) ? t.tomorrow : "";
-        const count = (day.lessons || []).filter((l) => !l.cancelled).length;
+        const count = (day.lessons || []).filter((l) => !l.cancelled && l.kind !== "event").length;
         nav = `<div class="nav">
             <button class="prev" ${idx === 0 ? "disabled" : ""} title="${t.prev}">‹</button>
             <span class="label">${rel ? `<b>${rel}</b> · ` : ""}${escapeHtml(day.weekday)} ${d.getDate()}. ${d.getMonth() + 1}.
@@ -467,6 +509,8 @@ class EdookitTimetableCard extends HTMLElement {
         overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
       .lesson .meta { font-size: 0.7em; color: var(--secondary-text-color); overflow: hidden; text-overflow: ellipsis;
         white-space: nowrap; }
+      .lesson.event { --bg: rgba(156, 39, 176, 0.14); --accent: #9c27b0; text-align: center; }
+      .lesson.event .subject { white-space: normal; }
       .lesson.changed { outline: 2px dashed var(--warning-color, #ff9800); outline-offset: -2px; }
       .lesson.cancelled { background: rgba(127,127,127,.12); border-left-color: var(--error-color, #db4437); }
       .lesson.cancelled .subject { text-decoration: line-through; color: var(--secondary-text-color); }

@@ -91,6 +91,13 @@ async def _as_child(client: EdookitClient, child: Child, fetch: Any) -> dict[str
         raise UpdateFailed(str(err)) from err
 
 
+def pick_child(blocks: list[dict[str, Any]], child: Child) -> dict[str, Any] | None:
+    """The block of ``child`` in a page that lists every student of the account."""
+    if child.id is not None:
+        return next((b for b in blocks if b["id"] == child.id), None)
+    return blocks[0] if blocks else None
+
+
 async def _save(store: Store, stored: dict[str, Any], client: EdookitClient) -> None:
     stored["cookies"] = client.export_cookies()
     store.async_delay_save(lambda: stored, 5)
@@ -181,15 +188,33 @@ class TimetableCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         pages = await self.client.async_get_timetable_pages(weeks)
         lessons: list[dict[str, Any]] = []
         seen: set[tuple] = set()
-        for html in pages:
-            for lesson in parsers.parse_timetable(html, today):
-                key = (lesson["date"], lesson["start"], lesson["subject"])
+
+        def add(items: list[dict[str, Any]]) -> None:
+            for lesson in items:
+                key = (lesson["date"], lesson.get("start"), lesson["subject"], lesson.get("kind"))
                 if key not in seen:
                     seen.add(key)
                     lessons.append(lesson)
+
+        for html in pages:
+            block = pick_child(parsers.parse_family_timetables(html), self.child)
+            add(block["lessons"] if block else [])
+
+        # The dashboard widget has this week's lessons incl. topics ("Učivo").
+        dashboard = pick_child(
+            parsers.parse_dashboard_children(await self.client.async_get_page("/"), today), self.child
+        )
+        if dashboard:
+            topics = {(ls["date"], ls.get("start")): ls.get("topic") for ls in dashboard["lessons"] if ls.get("topic")}
+            for lesson in lessons:
+                lesson["topic"] = lesson.get("topic") or topics.get((lesson["date"], lesson.get("start")))
+            covered = {ls["date"] for ls in lessons}
+            add([ls for ls in dashboard["lessons"] if ls["date"] not in covered])
+
         if not lessons:
-            # The dashboard shows a compact timetable for the current week.
-            lessons = parsers.parse_timetable(await self.client.async_get_page("/"), today)
+            # Other layouts (student accounts, older portals).
+            for html in pages:
+                add(parsers.parse_timetable(html, today))
         if not lessons:
             _LOGGER.warning(
                 "No lessons found on the Edookit timetable page. If the school's "
@@ -282,7 +307,7 @@ def _fill_order(lessons: list[dict[str, Any]]) -> None:
     """Number lessons without a start time by their order within the day."""
     by_day: dict[str, int] = {}
     for lesson in lessons:
-        if lesson.get("start") or lesson.get("period"):
+        if lesson.get("start") or lesson.get("period") or lesson.get("kind") == "event":
             continue
         by_day[lesson["date"]] = by_day.get(lesson["date"], 0) + 1
         lesson["period"] = by_day[lesson["date"]]
@@ -378,9 +403,15 @@ class EdookitDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         try:
             dashboard = await self._page("dashboard", errors)
+            student_widgets: dict[str, Any] | None = None
             if dashboard:
+                student_widgets = pick_child(parsers.parse_dashboard_children(dashboard, today), self.child)
                 if self.child.id is None:
-                    self.student = parsers.parse_student_name(dashboard) or self.student
+                    self.student = (
+                        (student_widgets or {}).get("name")
+                        or parsers.display_name(parsers.parse_student_name(dashboard))
+                        or self.student
+                    )
                     self._stored["student"] = self.student
                 data["action_items"] = parsers.parse_action_items(dashboard)
                 data["school_year"] = parsers.parse_school_year(dashboard)
@@ -418,7 +449,14 @@ class EdookitDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         data["unread"] = sum(1 for i in inbox if i["unread"])
         data["messages"] = [i for i in inbox if i["type"] == "inboxMessage"]
 
-        grades = parsed.get("evaluations") or [
+        widget_grades = (student_widgets or {}).get("grades") or []
+        subjects = (student_widgets or {}).get("subjects") or {}
+        for grade in widget_grades:
+            grade["subject_short"] = grade["subject"]
+            grade["subject"] = subjects.get(grade["subject"], grade["subject"])
+        # The grade list pages mix all children; the dashboard widget is per child.
+        grades = widget_grades if self.child.id is not None else parsed.get("evaluations") or widget_grades
+        grades = grades or [
             {
                 "subject": i["title"].split(" - ")[0],
                 "topic": " - ".join(i["title"].split(" - ")[1:]),
@@ -454,6 +492,10 @@ class EdookitDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             key=lambda e: e.get("start") or "9999",
         )
         data["attendance"] = parsed.get("attendance", {"records": [], "stats": {}, "unexcused": 0})
+        if student_widgets:
+            data["attendance"]["summary"] = student_widgets["absences"]
+            data["class_name"] = student_widgets["class_name"]
+            data["class_teacher"] = student_widgets["class_teacher"]
         data["payments"] = parsed.get("payments", {"payments": [], "outstanding": 0.0})
         data.setdefault("action_items", [])
 

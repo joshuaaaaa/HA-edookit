@@ -35,6 +35,7 @@ import json
 import logging
 import re
 import secrets
+import time
 from typing import Any
 from urllib.parse import parse_qs, quote, urlencode, urljoin, urlparse
 
@@ -42,7 +43,7 @@ import aiohttp
 from bs4 import BeautifulSoup
 from yarl import URL
 
-from .parsers import is_login_page, parse_children
+from .parsers import is_login_page, parse_children, parse_dashboard_children
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -159,6 +160,7 @@ class EdookitClient:
         self._child_lock = asyncio.Lock()
         self._selected_child: str | None = None
         self._active_child: Child | None = None
+        self._timetable_cache: tuple[int, float, list[str]] | None = None
         self.logged_in = False
         self.used_login_method: str | None = None
 
@@ -513,8 +515,20 @@ class EdookitClient:
     # -------------------------------------------------------------- children
 
     async def async_get_children(self) -> list[Child]:
-        """Children from the portal's switcher; ``[Child(None)]`` when there is none."""
-        found = parse_children(await self.async_get_page("/"))
+        """Students the account can see; ``[Child(None)]`` for a single one.
+
+        Parent dashboards show one "student-container" per child and the portal
+        pages list every child, so no switching is needed. Older layouts may only
+        offer a switcher link per child instead.
+        """
+        dashboard = await self.async_get_page("/")
+        students = parse_dashboard_children(dashboard)
+        if len(students) >= 2:
+            _LOGGER.debug("Edookit children found: %s", [(c["id"], c["name"]) for c in students])
+            return [Child(c["id"], c["name"]) for c in students]
+        if len(students) == 1:
+            return [Child(None, students[0]["name"])]
+        found = parse_children(dashboard)
         if not found:
             return [Child(None)]
         _LOGGER.debug("Edookit children found: %s", [(c["id"], c["name"]) for c in found])
@@ -565,19 +579,28 @@ class EdookitClient:
         return resp.text
 
     async def async_get_timetable_pages(self, weeks: int) -> list[str]:
-        """Return the timetable page for the current week and ``weeks - 1`` following ones."""
-        pages = [await self.async_get_page("/timetable/")]
-        if weeks <= 1:
-            return pages
+        """Timetable pages for the current week and ``weeks - 1`` following ones.
+
+        The portal remembers the shown week in the session: "familyTimetable-value=7"
+        moves it one week *relative* to the current one and "resetFilter" returns to
+        this week. Results are cached briefly because every child reads the same pages.
+        """
+        now = time.monotonic()
+        if self._timetable_cache and self._timetable_cache[0] == weeks and now - self._timetable_cache[1] < 120:
+            return self._timetable_cache[2]
+        pages = [await self.async_get_page("/timetable/?do=familyTimetable-resetFilter")]
         try:
-            for week in range(1, weeks):
-                await self.async_ajax(f"/timetable/?familyTimetable-value={7 * week}&do=familyTimetable-changeFilter")
-                pages.append(await self.async_get_page("/timetable/"))
+            for _ in range(1, weeks):
+                pages.append(
+                    await self.async_get_page("/timetable/?familyTimetable-value=7&do=familyTimetable-changeFilter")
+                )
         except EdookitConnectionError as err:
             _LOGGER.debug("Could not load following timetable weeks: %s", err)
         finally:
-            with contextlib.suppress(EdookitError):
-                await self.async_ajax("/timetable/?familyTimetable-value=0&do=familyTimetable-changeFilter")
+            if weeks > 1:
+                with contextlib.suppress(EdookitError):
+                    await self.async_get_page("/timetable/?do=familyTimetable-resetFilter")
+        self._timetable_cache = (weeks, now, pages)
         return pages
 
     # -------------------------------------------------------------- REST API

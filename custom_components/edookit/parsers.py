@@ -986,3 +986,248 @@ def bell_schedule(lessons: list[dict[str, Any]]) -> list[dict[str, Any]]:
 def _minutes(hhmm: str) -> int:
     hour, minute = hhmm.split(":")[:2]
     return int(hour) * 60 + int(minute)
+
+
+# --------------------------------------------------------------------------
+# Family timetable / dashboard (verified against a real parent portal)
+# --------------------------------------------------------------------------
+#
+# A parent account shows every child at once:
+#   /timetable/  <h2 class="heading">Name <span class="class-name">VI.B</span>
+#                <a class="print-pdf" href="/timetable/pdf?personId=2554&…">  followed by
+#                <div id="snippet-familyTimetable-personTimetable-2554"> with the week grid.
+#   /            <div class="student-container" id="student-container-2554"> with the
+#                child's grades, current-week timetable (incl. topics) and absences.
+# The grid: ".period-time" headers (title "1. 08:00–08:45", style left:X%), lessons
+# "a.lesson" positioned by data-posLeft/data-size with <span data-day="2026_11_02"
+# data-lesson-id="174483">, rows ".lessonRow" (short subject, teacher, room) and a
+# hidden "div.lesson-info#lesson-info-<id>" with date, times, "M - VI.B", subject,
+# "Nč (Nečasová L.)", room and "Učivo: …". Cancelled lessons contain "Zrušeno",
+# events have class "event" (data-allDayStart/End="1" for whole-day ones).
+
+_PERIOD_TITLE_RE = re.compile(r"(\d+)\.\s*(\d{1,2}:\d{2})\s*[–\-]\s*(\d{1,2}:\d{2})")
+_LEFT_RE = re.compile(r"left:\s*([\d.]+)%")
+
+
+def _hhmm(value: str | None) -> str | None:
+    if not value:
+        return None
+    match = _TIME_RE.search(value)
+    return f"{int(match.group(1)):02d}:{match.group(2)}" if match else None
+
+
+def _grid_periods(node: Tag) -> list[dict[str, Any]]:
+    periods: dict[int, dict[str, Any]] = {}
+    for header in node.select(".period-time"):
+        match = _PERIOD_TITLE_RE.search(clean(header.get("title") or header.get_text(" ")))
+        left = _LEFT_RE.search(header.get("style", ""))
+        if not match or not left:
+            continue
+        num = int(match.group(1))
+        periods.setdefault(
+            num,
+            {"period": num, "start": _hhmm(match.group(2)), "end": _hhmm(match.group(3)), "left": float(left.group(1))},
+        )
+    return sorted(periods.values(), key=lambda p: p["left"])
+
+
+def _lesson_info(div: Tag | None) -> dict[str, Any]:
+    """Read a hidden ``div.lesson-info`` block."""
+    if div is None:
+        return {}
+    rows = [row for row in div.find_all("div", recursive=False)]
+    texts = [clean(row.get_text(" ")) for row in rows]
+    info: dict[str, Any] = {}
+    if rows:
+        times = [_hhmm(t.get_text()) for t in rows[0].select(".date_time")]
+        if len(times) >= 2:
+            info["start"], info["end"] = times[0], times[1]
+    if len(texts) > 1 and texts[1]:
+        code, _, group = texts[1].partition(" - ")
+        info["code"] = clean(code)
+        info["group"] = clean(group) or None
+    if len(texts) > 2 and texts[2]:
+        info["subject"] = texts[2]
+    if len(texts) > 3 and texts[3]:
+        short, _, full = texts[3].partition(" (")
+        info["teacher"] = full.rstrip(")") or short
+        info["teacher_short"] = clean(short) or None
+    if len(texts) > 4 and texts[4] and not texts[4].startswith("Učivo"):
+        info["room"] = texts[4]
+    for text in texts[4:]:
+        if text.startswith("Učivo"):
+            info["topic"] = clean(text.partition(":")[2]) or None
+    return info
+
+
+def _parse_grid(node: Tag) -> list[dict[str, Any]]:
+    periods = _grid_periods(node)
+    infos = {div["id"][len("lesson-info-") :]: div for div in node.select("div.lesson-info[id^='lesson-info-']")}
+
+    def period_at(left: float) -> dict[str, Any] | None:
+        if not periods:
+            return None
+        best = min(periods, key=lambda p: abs(p["left"] - left))
+        return best if abs(best["left"] - left) < 2 else None
+
+    lessons: list[dict[str, Any]] = []
+    seen: set[tuple] = set()
+    for el in node.select(".lesson"):
+        classes = el.get("class", [])
+        day_el = el.find(attrs={"data-day": True})
+        if not day_el:
+            continue
+        try:
+            year, month, day = (int(x) for x in day_el["data-day"].split("_")[:3])
+            when = date(year, month, day)
+        except ValueError:
+            continue
+        lesson_id = (day_el.get("data-lesson-id") or "").split("-")[0] or None
+        left = _to_float(el.get("data-posleft")) or 0.0
+        size = _to_float(el.get("data-size")) or 0.0
+        rows = [clean(r.get_text(" ")) for r in el.select(".lessonRow")]
+        text = clean(el.get_text(" "))
+        cancelled = bool(_CANCEL_RE.search(text) or _CANCEL_RE.search(" ".join(classes)))
+        period = period_at(left)
+
+        if "event" in classes:
+            covered = [p for p in periods if left - 1 <= p["left"] < left + size - 1] or ([period] if period else [])
+            all_day = el.get("data-alldaystart") == "1" and el.get("data-alldayend") == "1"
+            lesson = {
+                "date": when.isoformat(),
+                "start": None if all_day or not covered else covered[0]["start"],
+                "end": None if all_day or not covered else covered[-1]["end"],
+                "subject": text,
+                "subject_short": text,
+                "teacher": None,
+                "room": None,
+                "group": None,
+                "topic": None,
+                "period": None if all_day or not covered else covered[0]["period"],
+                "period_end": None if all_day or not covered else covered[-1]["period"],
+                "all_day": all_day,
+                "changed": False,
+                "cancelled": False,
+                "note": None,
+                "kind": "event",
+                "url": normalize_url(el.get("href")),
+                "id": lesson_id,
+            }
+        else:
+            info = _lesson_info(infos.get(lesson_id or ""))
+            short = re.sub(r"(?i)zrušeno|odpadá", " ", rows[0] if rows else text)
+            short = clean(short) or None
+            lesson = {
+                "date": when.isoformat(),
+                "start": info.get("start") or (period or {}).get("start"),
+                "end": info.get("end") or (period or {}).get("end"),
+                "subject": info.get("subject") or short or text,
+                "subject_short": info.get("code") or short,
+                "teacher": info.get("teacher") or (rows[1] if len(rows) > 1 and rows[1] else None),
+                "room": info.get("room") or (rows[2] if len(rows) > 2 and rows[2] else None),
+                "group": info.get("group"),
+                "topic": info.get("topic"),
+                "period": (period or {}).get("period"),
+                "changed": cancelled or bool(_CHANGE_RE.search(" ".join(classes))),
+                "cancelled": cancelled,
+                "note": None,
+                "kind": "lesson",
+                "url": None,
+                "id": lesson_id,
+            }
+        key = (lesson["date"], lesson["start"], lesson["subject"], lesson["kind"])
+        if key in seen:
+            continue
+        seen.add(key)
+        lessons.append(lesson)
+    lessons.sort(key=lambda ls: (ls["date"], ls["start"] or "00:00"))
+    return lessons
+
+
+def parse_family_timetables(html: str | BeautifulSoup) -> list[dict[str, Any]]:
+    """Per-child timetables from ``/timetable/`` (parent view, all children on one page)."""
+    soup = soupify(html)
+    result = []
+    for heading in soup.select("h2.heading"):
+        link = heading.find("a", href=re.compile(r"personId=\d+"))
+        if not link:
+            continue
+        person_id = re.search(r"personId=(\d+)", link["href"]).group(1)
+        node = soup.find(id=f"snippet-familyTimetable-personTimetable-{person_id}")
+        if node is None:
+            continue
+        class_el = heading.select_one(".class-name")
+        result.append(
+            {
+                "id": person_id,
+                "name": clean(" ".join(heading.find_all(string=True, recursive=False))),
+                "class_name": clean(class_el.get_text()) if class_el else None,
+                "lessons": _parse_grid(node),
+            }
+        )
+    if not result:
+        # A student account (or another layout): one grid for the whole page.
+        node = soup.select_one(".timetable") or soup
+        if node.select(".lesson [data-day]"):
+            result.append({"id": None, "name": None, "class_name": None, "lessons": _parse_grid(soup)})
+    return result
+
+
+def _widget_grades(container: Tag, today: date) -> list[dict[str, Any]]:
+    grades = []
+    for item in container.select(".evaluation-widget-container a.item"):
+        course = clean((item.select_one(".course") or item).get_text(" "))
+        when = parse_date(clean((item.select_one(".date") or Tag(name="x")).get_text(" ")), today)
+        mark = item.select_one(".mark")
+        weight_el = mark.find(attrs={"title": re.compile(r"Váha", re.I)}) if mark else None
+        value_text = clean(mark.get_text(" ")) if mark else ""
+        not_evaluated = bool(mark and mark.select_one(".not-evaluated"))
+        grades.append(
+            {
+                "subject": course,
+                "topic": "",
+                "grade": value_text,
+                "value": None if not_evaluated else parse_grade_value(value_text),
+                "weight": _to_float(re.sub(r"[^\d.,]", "", weight_el["title"])) if weight_el else None,
+                "date": when.isoformat() + "T00:00:00" if when else None,
+                "url": normalize_url(item.get("href")),
+            }
+        )
+    return grades
+
+
+def parse_dashboard_children(html: str | BeautifulSoup, today: date | None = None) -> list[dict[str, Any]]:
+    """Per-child widgets of the dashboard: name, class, grades, timetable, absences."""
+    soup = soupify(html)
+    today = today or date.today()
+    result = []
+    for container in soup.select("div.student-container[id^='student-container-']"):
+        person_id = container["id"].rsplit("-", 1)[1]
+        header = container.select_one(".student-header-container")
+        name_el = header.select_one(".name") if header else None
+        class_el = header.select_one(".class") if header else None
+        teacher_el = header.select_one(".message-class-teacher") if header else None
+        timetable = container.select_one(".timetable-widget-container")
+        absences: dict[str, int] = {}
+        for cell in container.select(".attendance-container td[title]"):
+            number = cell.select_one(".number")
+            if number and clean(number.get_text()).isdigit():
+                absences[clean(cell["title"])] = int(clean(number.get_text()))
+        lessons = _parse_grid(timetable) if timetable else []
+        result.append(
+            {
+                "id": person_id,
+                "name": clean(name_el.get_text(" ")) if name_el else None,
+                "class_name": clean(class_el.get_text(" ")) if class_el else None,
+                "class_teacher": clean(teacher_el.get_text(" ")) if teacher_el else None,
+                "grades": _widget_grades(container, today),
+                "absences": absences,
+                "lessons": lessons,
+                "subjects": {
+                    ls["subject_short"]: ls["subject"]
+                    for ls in lessons
+                    if ls["kind"] == "lesson" and ls.get("subject_short") and ls["subject"] != ls["subject_short"]
+                },
+            }
+        )
+    return result

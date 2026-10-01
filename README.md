@@ -53,11 +53,14 @@ Zkopírujte složku `custom_components/edookit` do `/config/custom_components/` 
 | Způsob přihlášení | *Automaticky* (doporučeno – e-mail → heslo Plus4U, jinak přístupové kódy), *Plus4U (e-mail + heslo)*, *Plus4U +4U Access (přístupové kódy)* nebo *Klasický formulář Edookitu* (starší instalace) |
 | Plus4U OIDC client id | nechte prázdné, viz [Řešení problémů](#řešení-problémů) |
 
-**Více dětí na jednom rodičovském účtu:** integrace najde přepínač dětí nahoře na portálu
-a pro **každé dítě vytvoří samostatné zařízení** se všemi entitami (rozvrh, známky, úkoly…),
-např. `sensor.edookit_anna_rozvrh` a `sensor.edookit_petr_rozvrh`. Na dashboard pak dejte
-jednu kartu rozvrhu pro každé dítě. Pokud má každé dítě vlastní účet, přidejte integraci
-pro každý účet zvlášť.
+**Více dětí na jednom rodičovském účtu:** portál rodiče ukazuje všechny děti najednou
+(nástěnka i „Rozvrh žáků“), integrace je z nich přečte a pro **každé dítě vytvoří samostatné
+zařízení** se všemi entitami, např. `sensor.edookit_anna_novakova_rozvrh` a
+`sensor.edookit_petr_novak_rozvrh`. Na dashboard pak dejte jednu kartu rozvrhu pro každé dítě.
+Pro každé dítě zvlášť: **rozvrh** (včetně učiva, zrušených hodin a akcí jako svátek či výlet),
+**známky** (z přehledu na nástěnce, s vahami) a **absence**. Zprávy, úkoly, písemky, akce školy a platby
+jsou na portálu společné pro celou rodinu, proto jsou stejné u obou dětí. Pokud má každé dítě vlastní
+účet, přidejte integraci pro každý účet zvlášť.
 
 ### Možnosti (Nastavit → Možnosti)
 

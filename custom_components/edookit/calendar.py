@@ -58,6 +58,17 @@ class TimetableCalendar(_BaseCalendar):
     def _events(self) -> list[CalendarEvent]:
         events = []
         for lesson in (self.coordinator.data or {}).get("lessons", []):
+            if lesson.get("kind") == "event" and lesson.get("all_day"):
+                day = date.fromisoformat(lesson["date"])
+                events.append(
+                    CalendarEvent(
+                        start=day,
+                        end=day + timedelta(days=1),
+                        summary=lesson["subject"],
+                        uid=f"{lesson['date']}-event-{lesson['subject']}",
+                    )
+                )
+                continue
             start, end = lesson_start(lesson), lesson_end(lesson)
             if start is None or end is None:
                 continue

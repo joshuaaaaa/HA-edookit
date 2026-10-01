@@ -165,3 +165,56 @@ def test_children_switcher():
       <a href="/evaluation/?student=12">Přejít na hodnocení po předmětech</a>"""
     assert parsers.parse_children(links) == []
     assert parsers.display_name("Jakub Hrubý (Jarmila Šuláková, 9549-3740-1)") == "Jakub Hrubý"
+
+
+# ---------------------------------------------------------------- real portal layout
+# Fixtures below are anonymised copies of a real parent portal (two children, VI.B).
+
+
+def test_family_timetable_real_layout():
+    children = parsers.parse_family_timetables(load("family_timetable.html"))
+    assert [(c["id"], c["name"], c["class_name"]) for c in children] == [
+        ("102", "Anna Nováková", "VI.B"),
+        ("101", "Petr Novák", "VI.B"),
+    ]
+    lessons = children[0]["lessons"]
+    assert len(lessons) == 32
+    first = lessons[0]
+    assert {k: first[k] for k in ("date", "period", "start", "end", "subject", "subject_short", "room", "kind")} == {
+        "date": "2026-11-02",
+        "period": 1,
+        "start": "08:00",
+        "end": "08:45",
+        "subject": "Matematika",
+        "subject_short": "M",
+        "room": "M 6.B",
+        "kind": "lesson",
+    }
+    assert first["teacher"].startswith("Učitel")
+    assert {ls["date"] for ls in lessons} == {"2026-11-02", "2026-11-03", "2026-11-04", "2026-11-05", "2026-11-06"}
+    assert max(ls["period"] for ls in lessons) <= 8
+
+
+def test_family_dashboard_real_layout():
+    children = parsers.parse_dashboard_children(load("family_dashboard.html"), date(2026, 10, 1))
+    assert [c["name"] for c in children] == ["Anna Nováková", "Petr Novák"]
+    petr = children[1]
+    assert petr["id"] == "101"
+    assert petr["absences"] == {"Absence omluvená": 5}
+    assert petr["class_teacher"].startswith("Učitel")
+    assert petr["subjects"]["M"] == "Matematika"
+    # Grades with weights; "N" (not evaluated) and comment-only entries have no value.
+    grades = {(g["subject"], g["grade"], g["weight"]) for g in petr["grades"]}
+    assert ("M", "3", 1.0) in grades
+    assert ("D", "1", 0.5) in grades
+    assert any(g["grade"] == "N" and g["value"] is None for g in petr["grades"])
+
+    lessons = petr["lessons"]
+    holiday = [ls for ls in lessons if ls["date"] == "2026-09-28"]
+    assert holiday[0]["kind"] == "event" and holiday[0]["subject"] == "Státní svátek" and holiday[0]["all_day"]
+    assert all(ls["cancelled"] for ls in holiday if ls["kind"] == "lesson")
+    trip = next(ls for ls in lessons if ls["kind"] == "event" and ls["date"] == "2026-10-02")
+    assert (trip["subject"], trip["start"], trip["end"], trip["period"]) == ("Školní výlet", "08:00", "13:30", 1)
+    today = [ls for ls in lessons if ls["date"] == "2026-10-01"]
+    assert [ls["subject_short"] for ls in today] == ["D", "Čj", "Z", "SM", "Vv", "Vv"]
+    assert today[1]["topic"] == "Sloh: inzerát."

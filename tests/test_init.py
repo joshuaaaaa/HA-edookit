@@ -301,3 +301,49 @@ async def test_stale_child_devices_removed(hass: HomeAssistant, freezer: FrozenD
     await hass.async_block_till_done()
     assert registry.async_get(stale.id) is None
     assert registry.async_get_device(identifiers={(DOMAIN, entry.entry_id)}) is not None
+
+
+async def test_family_portal_two_children(hass: HomeAssistant, freezer: FrozenDateTimeFactory, pages) -> None:
+    """Real parent portal layout: both children on the same pages, one device each."""
+    pages["/"] = load("family_dashboard.html")
+    requested: list[str] = []
+
+    async def get_page(self, path: str) -> str:
+        requested.append(path)
+        if path.startswith("/timetable/"):
+            return load("family_timetable.html")
+        return pages.get(path, "<html><body></body></html>")
+
+    async def login(self) -> None:
+        self.logged_in = True
+
+    with (
+        patch("custom_components.edookit.api.EdookitClient.async_login", login),
+        patch("custom_components.edookit.api.EdookitClient.async_get_page", get_page),
+    ):
+        await hass.config.async_set_time_zone("Europe/Prague")
+        freezer.move_to("2026-10-01 09:00:00+02:00")
+        entry = MockConfigEntry(domain=DOMAIN, data=ENTRY_DATA, title="Rodič")
+        entry.add_to_hass(hass)
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+    assert [c.name for c in entry.runtime_data.children] == ["Anna Nováková", "Petr Novák"]
+    anna = hass.states.get("sensor.edookit_anna_novakova_timetable")
+    assert anna.state == "6"
+    assert anna.attributes["class_name"] == "VI.B"
+    assert hass.states.get("sensor.edookit_petr_novak_current_lesson").state == "Český jazyk a literatura"
+    assert hass.states.get("sensor.edookit_petr_novak_current_lesson").attributes["topic"] == "Sloh: inzerát."
+    assert hass.states.get("sensor.edookit_petr_novak_absences").state == "5"
+    assert hass.states.get("sensor.edookit_petr_novak_last_grade").state in {"1", "2", "3", "N", "Pouze komentář"}
+    assert hass.states.get("sensor.edookit_petr_novak_grade_average").attributes["subjects"]["Matematika"] == 3.0
+
+    # The week is moved with relative steps and always reset back (2 weeks by default).
+    timetable_requests = [p for p in requested if p.startswith("/timetable/?")]
+    assert timetable_requests[:3] == [
+        "/timetable/?do=familyTimetable-resetFilter",
+        "/timetable/?familyTimetable-value=7&do=familyTimetable-changeFilter",
+        "/timetable/?do=familyTimetable-resetFilter",
+    ]
+    # Both children share one download of the timetable pages.
+    assert len(timetable_requests) == 3

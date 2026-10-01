@@ -13,7 +13,7 @@ from homeassistant.util import dt as dt_util
 
 from .coordinator import ChildRuntime, EdookitConfigEntry
 from .entity import EdookitEntity
-from .timeutil import lesson_end, lesson_start, lessons_on
+from .timeutil import events_on, lesson_end, lesson_start, lessons_on
 
 
 async def async_setup_entry(
@@ -63,7 +63,9 @@ class SchoolDayBinarySensor(_TimeBinary):
     @property
     def is_on(self) -> bool:
         day = dt_util.now().date() + timedelta(days=self._offset)
-        return bool(lessons_on(self.lessons, day))
+        # A trip / project day counts as school; a whole-day holiday without lessons does not.
+        timed_events = [ev for ev in events_on(self.lessons, day) if not ev.get("all_day")]
+        return bool(lessons_on(self.lessons, day) or timed_events)
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
@@ -74,6 +76,7 @@ class SchoolDayBinarySensor(_TimeBinary):
         return {
             "date": day.isoformat(),
             "lessons": len(todays),
+            "events": [ev["subject"] for ev in events_on(self.lessons, day)],
             "first_lesson": min(starts).isoformat() if starts else None,
             "last_lesson_end": max(ends).isoformat() if ends else None,
         }
