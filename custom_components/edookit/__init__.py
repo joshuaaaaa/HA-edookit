@@ -9,8 +9,6 @@ import re
 from typing import Any
 
 import aiohttp
-from homeassistant.components.frontend import add_extra_js_url
-from homeassistant.components.http import StaticPathConfig
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_PASSWORD, CONF_USERNAME, Platform
 from homeassistant.core import HomeAssistant, ServiceCall, ServiceResponse, SupportsResponse, callback
@@ -25,8 +23,6 @@ import voluptuous as vol
 
 from .api import EdookitClient
 from .const import (
-    CARD_FILENAME,
-    CARD_URL,
     CONF_API_PASSWORD,
     CONF_API_USERNAME,
     CONF_LOGIN_METHOD,
@@ -40,7 +36,6 @@ from .const import (
     SERVICE_GET_TIMETABLE,
     SERVICE_REFRESH,
     STORAGE_VERSION,
-    VERSION,
 )
 from .coordinator import (
     PAGES,
@@ -70,13 +65,7 @@ def parse_time_option(value: str | None) -> time:
 
 
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
-    """Register the timetable card and the services."""
-    if hass.http is not None:
-        card_path = Path(__file__).parent / "frontend" / CARD_FILENAME
-        await hass.http.async_register_static_paths([StaticPathConfig(CARD_URL, str(card_path), False)])
-        if "frontend" in hass.config.components:
-            # Loads the card on every dashboard; no manual resource needed.
-            add_extra_js_url(hass, f"{CARD_URL}?v={VERSION}")
+    """Register the services."""
     _register_services(hass)
     return True
 

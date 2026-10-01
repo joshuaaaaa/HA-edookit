@@ -6,7 +6,7 @@
 Neoficiální integrace školního systému [Edookit](https://edookit.com/) do Home Assistanta.
 Přihlásí se stejným účtem jako rodič nebo žák na portálu školy (`https://<škola>.edookit.net`)
 a přinese do HA **rozvrh, zprávy, známky, domácí úkoly, písemky, akce školy, absence a platby**.
-Součástí je i **samostatná karta s rozvrhem** do dashboardu.
+Součástí repozitáře je i **samostatná karta s rozvrhem** (přidává se ručně, viz [Karta rozvrhu](#karta-rozvrhu)).
 
 ![Karta rozvrhu](docs/card-preview.png)
 
@@ -70,35 +70,19 @@ Pro každé dítě s vlastním účtem přidejte integraci znovu.
 
 ## Karta rozvrhu
 
-Karta se **zaregistruje automaticky** s integrací – nemusíte přidávat žádný zdroj (resource).
-V dashboardu: **Přidat kartu → Edookit rozvrh**, nebo YAML:
+Karta je **samostatná** ve složce [`edookit-timetable-card/`](edookit-timetable-card/) a přidává
+se **ručně** (HACS neumí z jednoho repozitáře nainstalovat integraci i kartu):
+
+1. zkopírujte [`edookit-timetable-card/edookit-timetable-card.js`](edookit-timetable-card/edookit-timetable-card.js) do `/config/www/`,
+2. **Nastavení → Ovládací panely → ⋮ → Zdroje → Přidat zdroj**: `/local/edookit-timetable-card.js`, typ *JavaScript modul*,
+3. v dashboardu přidejte kartu **Edookit rozvrh**:
 
 ```yaml
 type: custom:edookit-timetable-card
 entity: sensor.edookit_jan_novak_rozvrh
 ```
 
-| Volba | Výchozí | Popis |
-|---|---|---|
-| `entity` | – | senzor **Rozvrh** z integrace (povinné) |
-| `title` | jméno žáka | nadpis (`""` = bez nadpisu) |
-| `view` | `auto` | `week` = týdenní mřížka (dny × hodiny), `day` = seznam na jeden den, `auto` = podle šířky karty |
-| `show_room` | `true` | učebna |
-| `show_teacher` | `false` | vyučující |
-| `show_times` | `true` | časy hodin |
-| `show_footer` | `true` | čas poslední aktualizace |
-| `highlight_now` | `true` | zvýraznit probíhající hodinu |
-| `short_names` | `auto` | zkratky předmětů v úzké mřížce (`true` / `false` / `auto`) |
-| `next_week_from` | `friday_after_school` | kdy přepnout na další týden: `friday_after_school`, `saturday`, `never` |
-| `subject_colors` | – | vlastní barvy, např. `{Matematika: "#7e57c2"}`; jinak se barva odvodí z názvu |
-
-Šipkami se přepínají týdny (resp. dny), kliknutím na datum se vrátíte na dnešek. Kliknutím na
-nadpis otevřete detail entity. Zrušené hodiny jsou přeškrtnuté, změněné (suplování) mají čárkovaný rámeček.
-
-Karta jen zobrazuje data senzoru – rozvrh se stahuje jednou denně v nastavený čas.
-Kartu lze použít i bez HACS ručně: soubor je v `custom_components/edookit/frontend/edookit-timetable-card.js`
-a integrace ho servíruje na `/edookit/edookit-timetable-card.js`.
-
+Všechny volby karty jsou v [`edookit-timetable-card/README.md`](edookit-timetable-card/README.md).
 Další příklady (úkoly, průměry, kalendář) najdete v [`examples/dashboard.yaml`](examples/dashboard.yaml).
 
 ## Entity

@@ -1,16 +1,10 @@
 {
   "domain": "edookit",
   "name": "Edookit",
-  "after_dependencies": [
-    "frontend"
-  ],
   "codeowners": [
     "@joshuaaaaa"
   ],
   "config_flow": true,
-  "dependencies": [
-    "http"
-  ],
   "documentation": "https://github.com/joshuaaaaa/HA-edookit",
   "integration_type": "service",
   "iot_class": "cloud_polling",

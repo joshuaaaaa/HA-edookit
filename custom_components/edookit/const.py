@@ -50,9 +50,6 @@ SERVICE_REFRESH: Final = "refresh"
 SERVICE_DUMP_PAGES: Final = "dump_pages"
 SERVICE_GET_TIMETABLE: Final = "get_timetable"
 
-# Frontend
-CARD_FILENAME: Final = "edookit-timetable-card.js"
-CARD_URL: Final = f"/{DOMAIN}/{CARD_FILENAME}"
 
 STORAGE_VERSION: Final = 1
 

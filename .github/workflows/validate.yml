@@ -37,4 +37,4 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - run: node --check custom_components/edookit/frontend/edookit-timetable-card.js
+      - run: node --check edookit-timetable-card/edookit-timetable-card.js

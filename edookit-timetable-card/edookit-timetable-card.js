@@ -570,7 +570,7 @@ if (!customElements.get("edookit-timetable-card")) {
     name: "Edookit rozvrh",
     description: "Rozvrh hodin z integrace Edookit (týdenní mřížka nebo denní seznam).",
     preview: true,
-    documentationURL: "https://github.com/joshuaaaaa/HA-edookit",
+    documentationURL: "https://github.com/joshuaaaaa/HA-edookit/tree/main/edookit-timetable-card",
   });
   console.info(`%c EDOOKIT-TIMETABLE-CARD %c ${CARD_VERSION} `, "background:#3f51b5;color:#fff", "background:#ddd;color:#000");
 }
