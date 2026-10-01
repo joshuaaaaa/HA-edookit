@@ -28,23 +28,35 @@ import voluptuous as vol
 
 from .api import EdookitAuthError, EdookitClient, EdookitConnectionError, normalize_school
 from .const import (
+    CONF_AFTER_LESSON_DELAY,
     CONF_API_PASSWORD,
     CONF_API_STUDENT_ID,
     CONF_API_USERNAME,
     CONF_FIRE_EVENTS,
     CONF_ICAL_URL,
     CONF_LOGIN_METHOD,
+    CONF_OFF_SCHOOL_INTERVAL,
     CONF_OIDC_CLIENT_ID,
     CONF_PUBLIC_API,
+    CONF_QUIET_END,
+    CONF_QUIET_START,
     CONF_SCAN_INTERVAL,
     CONF_SCHOOL,
+    CONF_SMART_REFRESH,
     CONF_TIMETABLE_SOURCE,
     CONF_TIMETABLE_TIME,
+    CONF_TRAVEL_TIME,
     CONF_WEEKS,
+    DEFAULT_AFTER_LESSON_DELAY,
     DEFAULT_FIRE_EVENTS,
+    DEFAULT_OFF_SCHOOL_INTERVAL,
     DEFAULT_PUBLIC_API,
+    DEFAULT_QUIET_END,
+    DEFAULT_QUIET_START,
     DEFAULT_SCAN_INTERVAL,
+    DEFAULT_SMART_REFRESH,
     DEFAULT_TIMETABLE_TIME,
+    DEFAULT_TRAVEL_TIME,
     DEFAULT_WEEKS,
     DOMAIN,
     LOGIN_AUTO,
@@ -213,6 +225,24 @@ class EdookitOptionsFlow(OptionsFlow):
                     translation_key="timetable_source",
                     mode=SelectSelectorMode.DROPDOWN,
                 )
+            ),
+            vol.Required(
+                CONF_SMART_REFRESH, default=opts.get(CONF_SMART_REFRESH, DEFAULT_SMART_REFRESH)
+            ): BooleanSelector(),
+            vol.Required(
+                CONF_AFTER_LESSON_DELAY, default=opts.get(CONF_AFTER_LESSON_DELAY, DEFAULT_AFTER_LESSON_DELAY)
+            ): NumberSelector(
+                NumberSelectorConfig(min=0, max=60, step=1, mode=NumberSelectorMode.BOX, unit_of_measurement="min")
+            ),
+            vol.Required(
+                CONF_OFF_SCHOOL_INTERVAL, default=opts.get(CONF_OFF_SCHOOL_INTERVAL, DEFAULT_OFF_SCHOOL_INTERVAL)
+            ): NumberSelector(
+                NumberSelectorConfig(min=15, max=1440, step=15, mode=NumberSelectorMode.BOX, unit_of_measurement="min")
+            ),
+            vol.Required(CONF_QUIET_START, default=opts.get(CONF_QUIET_START, DEFAULT_QUIET_START)): TimeSelector(),
+            vol.Required(CONF_QUIET_END, default=opts.get(CONF_QUIET_END, DEFAULT_QUIET_END)): TimeSelector(),
+            vol.Required(CONF_TRAVEL_TIME, default=opts.get(CONF_TRAVEL_TIME, DEFAULT_TRAVEL_TIME)): NumberSelector(
+                NumberSelectorConfig(min=0, max=180, step=1, mode=NumberSelectorMode.BOX, unit_of_measurement="min")
             ),
             vol.Required(CONF_FIRE_EVENTS, default=opts.get(CONF_FIRE_EVENTS, DEFAULT_FIRE_EVENTS)): BooleanSelector(),
             vol.Required(CONF_PUBLIC_API, default=opts.get(CONF_PUBLIC_API, DEFAULT_PUBLIC_API)): BooleanSelector(),

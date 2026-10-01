@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from typing import Any
 
 from homeassistant.components.sensor import SensorDeviceClass, SensorEntity, SensorStateClass
@@ -12,10 +12,21 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.event import async_track_time_change
 from homeassistant.util import dt as dt_util
 
-from .const import CONF_PUBLIC_API, DEFAULT_PUBLIC_API
+from .const import CONF_PUBLIC_API, CONF_TRAVEL_TIME, DEFAULT_PUBLIC_API, DEFAULT_TRAVEL_TIME
 from .coordinator import ChildRuntime, EdookitConfigEntry
 from .entity import EdookitEntity
-from .timeutil import compact, events_on, lesson_end, lesson_start, lessons_on, next_school_day, timetable_exams
+from .timeutil import (
+    compact,
+    current_or_next,
+    events_on,
+    lesson_end,
+    lesson_start,
+    lessons_on,
+    next_school_day,
+    school_day_bounds,
+    school_day_items,
+    timetable_exams,
+)
 
 LIST_LIMIT = 20
 
@@ -33,6 +44,11 @@ async def async_setup_entry(
             NextLessonSensor(entry, child),
             SchoolStartSensor(entry, child, "school_start_today", tomorrow=False),
             SchoolEndSensor(entry, child),
+            SchoolEndSensor(entry, child, "school_end_next", next_day=True),
+            ArrivalHomeSensor(entry, child),
+            SubjectSensor(entry, child),
+            SubjectSensor(entry, child, "subject_start", part="start"),
+            SubjectSensor(entry, child, "subject_end", part="end"),
             SchoolStartSensor(entry, child, "school_start_next", tomorrow=True),
             TimetableChangesSensor(entry, child),
             UnreadSensor(entry, child),
@@ -223,25 +239,134 @@ class SchoolStartSensor(_TimetableBase):
     def native_value(self) -> datetime | None:
         today = dt_util.now().date()
         day = next_school_day(self.lessons, today) if self._tomorrow else today
-        if day is None:
-            return None
-        starts = [s for ls in lessons_on(self.lessons, day) if (s := lesson_start(ls))]
-        return min(starts) if starts else None
+        return school_day_bounds(self.lessons, day)[0] if day else None
 
 
 class SchoolEndSensor(_TimetableBase):
-    """End of the last lesson today."""
+    """End of school today / on the next school day (lessons and timed events such as trips)."""
 
     _attr_device_class = SensorDeviceClass.TIMESTAMP
-    _attr_icon = "mdi:home-import-outline"
+    _attr_icon = "mdi:bell-ring-outline"
+    _per_minute = True
 
-    def __init__(self, entry: EdookitConfigEntry, child: ChildRuntime) -> None:
-        super().__init__(entry, child, "school_end_today")
+    def __init__(
+        self, entry: EdookitConfigEntry, child: ChildRuntime, key: str = "school_end_today", next_day: bool = False
+    ) -> None:
+        super().__init__(entry, child, key)
+        self._next_day = next_day
+
+    def _day(self) -> date | None:
+        today = dt_util.now().date()
+        return next_school_day(self.lessons, today) if self._next_day else today
 
     @property
     def native_value(self) -> datetime | None:
-        ends = [e for ls in lessons_on(self.lessons, dt_util.now().date()) if (e := lesson_end(ls))]
-        return max(ends) if ends else None
+        day = self._day()
+        return school_day_bounds(self.lessons, day)[1] if day else None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        day = self._day()
+        if day is None:
+            return {}
+        items = school_day_items(self.lessons, day)
+        end = school_day_bounds(self.lessons, day)[1]
+        last = max(items, key=lambda ls: lesson_end(ls) or dt_util.now()) if items else None
+        attrs: dict[str, Any] = {
+            "date": day.isoformat(),
+            "last_lesson": last["subject"] if last else None,
+            "last_period": last.get("period") if last else None,
+        }
+        if end and not self._next_day:
+            attrs["minutes_left"] = max(0, int((end - dt_util.now()).total_seconds() // 60))
+        return attrs
+
+
+class ArrivalHomeSensor(_TimetableBase):
+    """When the child gets home: end of school + travel time (option)."""
+
+    _attr_device_class = SensorDeviceClass.TIMESTAMP
+    _attr_icon = "mdi:home-account"
+    _per_minute = True
+
+    def __init__(self, entry: EdookitConfigEntry, child: ChildRuntime) -> None:
+        super().__init__(entry, child, "arrival_home")
+        self._travel = timedelta(minutes=float(entry.options.get(CONF_TRAVEL_TIME, DEFAULT_TRAVEL_TIME)))
+
+    @property
+    def native_value(self) -> datetime | None:
+        end = school_day_bounds(self.lessons, dt_util.now().date())[1]
+        return end + self._travel if end else None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        today = dt_util.now().date()
+        end = school_day_bounds(self.lessons, today)[1]
+        nxt = next_school_day(self.lessons, today)
+        next_end = school_day_bounds(self.lessons, nxt)[1] if nxt else None
+        return {
+            "school_end": end.isoformat() if end else None,
+            "travel_minutes": int(self._travel.total_seconds() // 60),
+            "at_school": bool(end and dt_util.now() < end),
+            "next_school_day": nxt.isoformat() if nxt else None,
+            "next_arrival": (next_end + self._travel).isoformat() if next_end else None,
+        }
+
+
+STATE_LABELS = {
+    "lesson": "probíhá",
+    "break": "přestávka",
+    "before_school": "před vyučováním",
+    "next_day": "další školní den",
+}
+
+
+class SubjectSensor(_TimetableBase):
+    """The subject in progress, or the next one - with its start and end."""
+
+    _attr_icon = "mdi:book-open-variant"
+    _per_minute = True
+
+    def __init__(
+        self, entry: EdookitConfigEntry, child: ChildRuntime, key: str = "subject", part: str = "name"
+    ) -> None:
+        super().__init__(entry, child, key)
+        self._part = part
+        if part in ("start", "end"):
+            self._attr_device_class = SensorDeviceClass.TIMESTAMP
+            self._attr_icon = "mdi:clock-start" if part == "start" else "mdi:clock-end"
+
+    @property
+    def native_value(self) -> Any:
+        lesson, _ = current_or_next(self.lessons, dt_util.now())
+        if lesson is None:
+            return None
+        if self._part == "start":
+            return lesson_start(lesson)
+        if self._part == "end":
+            return lesson_end(lesson)
+        return lesson["subject"][:255]
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        now = dt_util.now()
+        lesson, state = current_or_next(self.lessons, now)
+        if lesson is None:
+            return {}
+        start, end = lesson_start(lesson), lesson_end(lesson)
+        attrs = {
+            **compact(lesson),
+            "date": lesson["date"],
+            "state": state,
+            "state_label": STATE_LABELS.get(state or ""),
+            "starts_at": start.isoformat() if start else None,
+            "ends_at": end.isoformat() if end else None,
+        }
+        if state == "lesson" and end:
+            attrs["minutes_left"] = int((end - now).total_seconds() // 60)
+        elif start:
+            attrs["minutes_until"] = int((start - now).total_seconds() // 60)
+        return attrs
 
 
 class TimetableChangesSensor(_TimetableBase):
@@ -578,6 +703,9 @@ class LastUpdateSensor(_DataBase):
             "timetable_updated": timetable.get("updated"),
             "timetable_source": timetable.get("source"),
             "login_method": self.runtime.client.used_login_method,
+            "next_refresh": self.runtime.smart.plan.when.isoformat()
+            if self.runtime.smart and self.runtime.smart.plan
+            else None,
             "child_id": self.child.child.id,
             "children": [c.name for c in self.runtime.children],
             "school_year": self.data.get("school_year"),

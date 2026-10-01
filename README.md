@@ -67,7 +67,12 @@ jsou na portálu společné pro celou rodinu, proto jsou stejné u obou dětí. 
 | Volba | Výchozí | Popis |
 |---|---|---|
 | **Čas denní aktualizace rozvrhu** | 05:00 | kdy se má rozvrh každý den stáhnout |
-| Interval aktualizace zpráv, známek a úkolů | 60 min | `0` = jen jednou denně spolu s rozvrhem |
+| **Chytrá aktualizace** | zapnuto | během vyučování stáhne zprávy, známky a úkoly **chvíli po konci každé hodiny**, odpoledne / o víkendu / o prázdninách jen občas, v noci vůbec; po poslední hodině dne obnoví i rozvrh |
+| Aktualizovat po skončení hodiny za | 5 min | učitelé zapisují známky a poznámky až po hodině |
+| Interval aktualizace mimo vyučování | 180 min | když děti nejsou ve škole |
+| Neaktualizovat od / do | 22:00 – 6:00 | noční klid |
+| Cesta ze školy domů | 15 min | pro senzor **Příchod domů** |
+| Interval aktualizace zpráv, známek a úkolů | 60 min | jen při vypnuté chytré aktualizaci; `0` = jen jednou denně spolu s rozvrhem |
 | Počet načítaných týdnů rozvrhu | 2 | aktuální + následující týden(y); o víkendu se začíná příštím týdnem |
 | Zdroj rozvrhu | Automaticky | *Portál* (webová stránka), *iCal adresa*, *REST API* |
 | Vyvolávat událost `edookit_new_item` | zapnuto | pro notifikace |
@@ -101,7 +106,12 @@ Názvy entit se tvoří z jazyka HA při přidání integrace (zde česky, žák
 | `sensor.edookit_jan_novak_rozvrh` | počet hodin dnes | `days` (celý rozvrh pro kartu), `bell` (zvonění), `today`, `source`, `last_update` |
 | `sensor.…_hodiny_zitra` | počet hodin zítra | `lessons`, `subjects`, `next_school_day` |
 | `sensor.…_aktualni_hodina` / `…_dalsi_hodina` | předmět | `start`, `end`, `room`, `teacher`, `minutes_left` / `minutes_until` |
-| `sensor.…_zacatek_vyucovani_dnes`, `…_konec_vyucovani_dnes`, `…_zacatek_dalsiho_skolniho_dne` | čas (timestamp) | |
+| `sensor.…_predmet` | aktuální předmět, o přestávce / ráno ten další | `state` (probíhá / přestávka / před vyučováním / další školní den), `start`, `end`, `room`, `teacher`, `topic`, `exam`, `minutes_left` / `minutes_until` |
+| `sensor.…_zacatek_predmetu`, `…_konec_predmetu` | čas (timestamp) | začátek a konec předmětu výše – HA ukazuje „za 10 minut“ |
+| `sensor.…_konec_vyucovani_dnes` | čas (timestamp) | konec školy dnes (i když je výlet), `last_lesson`, `minutes_left` |
+| `sensor.…_prichod_domu` | čas (timestamp) | konec vyučování + cesta domů; `next_arrival` pro další školní den |
+| `sensor.…_konec_dalsiho_skolniho_dne` | čas (timestamp) | |
+| `sensor.…_zacatek_vyucovani_dnes`, `…_zacatek_dalsiho_skolniho_dne` | čas (timestamp) | |
 | `sensor.…_zmeny_v_rozvrhu` | počet | `changes` |
 | `sensor.…_neprectene` | počet | `items` |
 | `sensor.…_posledni_zprava` | předmět zprávy | `from`, `preview`, `url`, `messages` |
@@ -110,7 +120,7 @@ Názvy entit se tvoří z jazyka HA při přidání integrace (zde česky, žák
 | `sensor.…_domaci_ukoly`, `…_pisemky`, `…_akce_skoly`, `…_vyzaduje_akci` | počet | `items`, `next` |
 | `sensor.…_absence` | počet záznamů | `unexcused`, `records`, `stats` |
 | `sensor.…_platby_k_uhrade` | Kč | `unpaid` |
-| `sensor.…_posledni_aktualizace` (diagnostika) | čas | `errors` – co se nepodařilo načíst |
+| `sensor.…_posledni_aktualizace` (diagnostika) | čas | `errors` – co se nepodařilo načíst, `next_refresh` – kdy proběhne další chytrá aktualizace |
 | `binary_sensor.…_skola_dnes`, `…_skola_zitra`, `…_probiha_hodina`, `…_neprectene_zpravy` | on/off | |
 | `calendar.…_rozvrh`, `calendar.…_skolni_diar` | kalendáře | |
 | `button.…_aktualizovat` | stáhne vše hned | |

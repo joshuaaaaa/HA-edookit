@@ -29,6 +29,12 @@ CONF_API_STUDENT_ID: Final = "api_student_id"
 CONF_PUBLIC_API: Final = "public_api"
 CONF_FIRE_EVENTS: Final = "fire_events"
 CONF_OIDC_CLIENT_ID: Final = "oidc_client_id"
+CONF_SMART_REFRESH: Final = "smart_refresh"
+CONF_AFTER_LESSON_DELAY: Final = "after_lesson_delay"
+CONF_OFF_SCHOOL_INTERVAL: Final = "off_school_interval"
+CONF_QUIET_START: Final = "quiet_start"
+CONF_QUIET_END: Final = "quiet_end"
+CONF_TRAVEL_TIME: Final = "travel_time"
 
 SOURCE_AUTO: Final = "auto"
 SOURCE_PORTAL: Final = "portal"
@@ -41,6 +47,12 @@ DEFAULT_SCAN_INTERVAL: Final = 60  # minutes, 0 = only once a day
 DEFAULT_WEEKS: Final = 2
 DEFAULT_PUBLIC_API: Final = False
 DEFAULT_FIRE_EVENTS: Final = True
+DEFAULT_SMART_REFRESH: Final = True
+DEFAULT_AFTER_LESSON_DELAY: Final = 5  # minutes after a lesson ends
+DEFAULT_OFF_SCHOOL_INTERVAL: Final = 180  # minutes outside school hours
+DEFAULT_QUIET_START: Final = "22:00:00"
+DEFAULT_QUIET_END: Final = "06:00:00"
+DEFAULT_TRAVEL_TIME: Final = 15  # minutes from school to home
 
 # Events fired on the HA bus
 EVENT_NEW_ITEM: Final = "edookit_new_item"

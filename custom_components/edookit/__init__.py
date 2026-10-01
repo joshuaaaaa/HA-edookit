@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from datetime import date, datetime, time
+from collections.abc import Callable
+from datetime import date, datetime, time, timedelta
 import json
 import logging
 from pathlib import Path
@@ -16,7 +17,7 @@ from homeassistant.core import HomeAssistant, ServiceCall, ServiceResponse, Supp
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady, ServiceValidationError
 from homeassistant.helpers import config_validation as cv, device_registry as dr
 from homeassistant.helpers.aiohttp_client import async_create_clientsession
-from homeassistant.helpers.event import async_track_time_change
+from homeassistant.helpers.event import async_track_point_in_time, async_track_time_change
 from homeassistant.helpers.storage import Store
 from homeassistant.helpers.typing import ConfigType
 from homeassistant.util import dt as dt_util
@@ -24,12 +25,22 @@ import voluptuous as vol
 
 from .api import EdookitAuthError, EdookitClient, EdookitError
 from .const import (
+    CONF_AFTER_LESSON_DELAY,
     CONF_API_PASSWORD,
     CONF_API_USERNAME,
     CONF_LOGIN_METHOD,
+    CONF_OFF_SCHOOL_INTERVAL,
     CONF_OIDC_CLIENT_ID,
+    CONF_QUIET_END,
+    CONF_QUIET_START,
     CONF_SCHOOL,
+    CONF_SMART_REFRESH,
     CONF_TIMETABLE_TIME,
+    DEFAULT_AFTER_LESSON_DELAY,
+    DEFAULT_OFF_SCHOOL_INTERVAL,
+    DEFAULT_QUIET_END,
+    DEFAULT_QUIET_START,
+    DEFAULT_SMART_REFRESH,
     DEFAULT_TIMETABLE_TIME,
     DOMAIN,
     LOGIN_AUTO,
@@ -46,6 +57,8 @@ from .coordinator import (
     EdookitRuntimeData,
     TimetableCoordinator,
 )
+from .scheduler import RefreshPlan, plan_next_refresh
+from .timeutil import lesson_end
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -58,11 +71,11 @@ ATTR_START = "start_date"
 ATTR_END = "end_date"
 
 
-def parse_time_option(value: str | None) -> time:
-    """Parse ``HH:MM[:SS]`` (falls back to the default)."""
+def parse_time_option(value: str | None, default: str = DEFAULT_TIMETABLE_TIME) -> time:
+    """Parse ``HH:MM[:SS]`` (falls back to ``default``)."""
     match = re.fullmatch(r"(\d{1,2}):(\d{2})(?::(\d{2}))?", (value or "").strip())
     if not match:
-        return parse_time_option(DEFAULT_TIMETABLE_TIME)
+        return parse_time_option(default)
     return time(int(match.group(1)), int(match.group(2)), int(match.group(3) or 0))
 
 
@@ -122,10 +135,80 @@ async def async_setup_entry(hass: HomeAssistant, entry: EdookitConfigEntry) -> b
     entry.async_on_unload(
         async_track_time_change(hass, _daily_refresh, hour=when.hour, minute=when.minute, second=when.second)
     )
+    if entry.options.get(CONF_SMART_REFRESH, DEFAULT_SMART_REFRESH):
+        entry.runtime_data.smart = SmartRefresh(hass, entry, children)
+        entry.runtime_data.smart.start()
     entry.async_on_unload(entry.add_update_listener(_async_options_updated))
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     return True
+
+
+class SmartRefresh:
+    """Refresh after every lesson, rarely outside school, never at night."""
+
+    def __init__(self, hass: HomeAssistant, entry: EdookitConfigEntry, children: list[ChildRuntime]) -> None:
+        self.hass = hass
+        self.entry = entry
+        self.children = children
+        opts = entry.options
+        self.delay = timedelta(minutes=float(opts.get(CONF_AFTER_LESSON_DELAY, DEFAULT_AFTER_LESSON_DELAY)))
+        self.off_school = timedelta(
+            minutes=max(15.0, float(opts.get(CONF_OFF_SCHOOL_INTERVAL, DEFAULT_OFF_SCHOOL_INTERVAL)))
+        )
+        self.quiet_start = parse_time_option(opts.get(CONF_QUIET_START, DEFAULT_QUIET_START), DEFAULT_QUIET_START)
+        self.quiet_end = parse_time_option(opts.get(CONF_QUIET_END, DEFAULT_QUIET_END), DEFAULT_QUIET_END)
+        self._unsub: Callable[[], None] | None = None
+        self.plan: RefreshPlan | None = None
+
+    def start(self) -> None:
+        """Schedule the first refresh and cancel the timer on unload."""
+        self.entry.async_on_unload(self._cancel)
+        self._schedule()
+
+    @callback
+    def _cancel(self) -> None:
+        if self._unsub:
+            self._unsub()
+            self._unsub = None
+
+    def _lesson_ends(self) -> list[datetime]:
+        ends: list[datetime] = []
+        for child in self.children:
+            for lesson in (child.timetable.data or {}).get("lessons", []):
+                if lesson.get("cancelled") or lesson.get("all_day"):
+                    continue
+                if lesson.get("kind") == "event" and not lesson.get("start"):
+                    continue
+                if (end := lesson_end(lesson)) is not None:
+                    ends.append(end)
+        return ends
+
+    @callback
+    def _schedule(self) -> None:
+        self._cancel()
+        self.plan = plan_next_refresh(
+            dt_util.now(),
+            self._lesson_ends(),
+            delay=self.delay,
+            off_school=self.off_school,
+            quiet_start=self.quiet_start,
+            quiet_end=self.quiet_end,
+        )
+        _LOGGER.debug("Next Edookit refresh at %s (%s)", self.plan.when, self.plan)
+        self._unsub = async_track_point_in_time(self.hass, self._fire, self.plan.when)
+
+    async def _fire(self, now: datetime) -> None:
+        self._unsub = None
+        plan = self.plan
+        try:
+            for child in self.children:
+                await child.data.async_refresh()
+                if plan and plan.last_of_day:
+                    # After school: catch timetable changes for the next days.
+                    await child.timetable.async_refresh()
+        finally:
+            self._schedule()
 
 
 def _remove_stale_devices(hass: HomeAssistant, entry: ConfigEntry, children: list[ChildRuntime]) -> None:

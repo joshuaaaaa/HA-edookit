@@ -22,11 +22,13 @@ from .const import (
     CONF_ICAL_URL,
     CONF_PUBLIC_API,
     CONF_SCAN_INTERVAL,
+    CONF_SMART_REFRESH,
     CONF_TIMETABLE_SOURCE,
     CONF_WEEKS,
     DEFAULT_FIRE_EVENTS,
     DEFAULT_PUBLIC_API,
     DEFAULT_SCAN_INTERVAL,
+    DEFAULT_SMART_REFRESH,
     DEFAULT_WEEKS,
     DOMAIN,
     EVENT_NEW_ITEM,
@@ -67,6 +69,7 @@ class EdookitRuntimeData:
     store: Store
     stored: dict[str, Any]
     children: list[ChildRuntime]
+    smart: Any = None  # SmartRefresh when smart refresh is enabled
 
 
 type EdookitConfigEntry = ConfigEntry[EdookitRuntimeData]
@@ -364,6 +367,8 @@ class EdookitDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         child: Child,
     ) -> None:
         minutes = int(_opt(entry, CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL))
+        if _opt(entry, CONF_SMART_REFRESH, DEFAULT_SMART_REFRESH):
+            minutes = 0  # refreshed by the smart scheduler (after lessons) instead
         super().__init__(
             hass,
             _LOGGER,

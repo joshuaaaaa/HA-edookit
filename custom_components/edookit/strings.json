@@ -64,14 +64,24 @@
           "api_username": "School REST API username (optional)",
           "api_password": "School REST API password (optional)",
           "api_student_id": "Student id for the REST API (optional)",
-          "oidc_client_id": "Plus4U OIDC client id (advanced)"
+          "oidc_client_id": "Plus4U OIDC client id (advanced)",
+          "smart_refresh": "Smart refresh (after every lesson)",
+          "after_lesson_delay": "Refresh after a lesson ends",
+          "off_school_interval": "Refresh interval outside school hours",
+          "quiet_start": "No refreshes from",
+          "quiet_end": "No refreshes until",
+          "travel_time": "Travel time from school to home"
         },
         "data_description": {
           "timetable_update_time": "The timetable is downloaded once a day at this time (and when Home Assistant starts or you press Refresh).",
-          "scan_interval": "Minutes. 0 = only once a day together with the timetable.",
+          "scan_interval": "Minutes. Used only when smart refresh is off. 0 = only once a day together with the timetable.",
           "timetable_source": "Automatic: REST API if configured, otherwise iCal URL if set, otherwise the portal web page.",
           "ical_url": "If your school provides a calendar (iCal/ICS) link with the timetable, it is the most reliable source.",
-          "api_username": "Only if your school gave you credentials for the Edookit REST API (most parents do not have them)."
+          "api_username": "Only if your school gave you credentials for the Edookit REST API (most parents do not have them).",
+          "smart_refresh": "During school, messages, grades and homework are downloaded shortly after every lesson ends; afternoons, weekends and holidays use the longer interval below; nothing is downloaded at night. When off, the fixed interval above is used.",
+          "after_lesson_delay": "Minutes after the end of a lesson (teachers enter grades and notes after the lesson).",
+          "off_school_interval": "Minutes between refreshes when the children are not at school.",
+          "travel_time": "Minutes – used by the “Arrival home” sensor."
         }
       }
     }
@@ -165,6 +175,21 @@
       },
       "last_update": {
         "name": "Last update"
+      },
+      "school_end_next": {
+        "name": "Next school day end"
+      },
+      "arrival_home": {
+        "name": "Arrival home"
+      },
+      "subject": {
+        "name": "Subject"
+      },
+      "subject_start": {
+        "name": "Subject start"
+      },
+      "subject_end": {
+        "name": "Subject end"
       }
     },
     "binary_sensor": {

@@ -48,3 +48,15 @@
       data:
         media_player_entity_id: media_player.kuchyn
         message: "Nová známka z předmětu {{ trigger.event.data.title }}: {{ trigger.event.data.grade }}"
+
+# Notify 10 minutes before the child arrives home (sensor: end of school + travel time).
+- alias: "Škola – dítě přijde domů"
+  triggers:
+    - trigger: template
+      value_template: >
+        {% set t = states('sensor.edookit_jan_novak_prichod_domu') %}
+        {{ t not in ['unknown', 'unavailable'] and now() >= as_datetime(t) - timedelta(minutes=10) }}
+  actions:
+    - action: notify.mobile_app_telefon
+      data:
+        message: "Jan dorazí domů kolem {{ as_timestamp(states('sensor.edookit_jan_novak_prichod_domu')) | timestamp_custom('%H:%M') }}"

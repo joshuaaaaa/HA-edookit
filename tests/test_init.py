@@ -204,6 +204,7 @@ async def test_options_flow(hass: HomeAssistant, freezer: FrozenDateTimeFactory,
             "timetable_source": "portal",
             "fire_events": False,
             "public_api": False,
+            "smart_refresh": False,
         },
     )
     assert result["type"] is FlowResultType.CREATE_ENTRY
@@ -338,6 +339,28 @@ async def test_family_portal_two_children(hass: HomeAssistant, freezer: FrozenDa
     assert hass.states.get("sensor.edookit_petr_novak_absences").state == "5"
     assert hass.states.get("sensor.edookit_petr_novak_last_grade").state in {"1", "2", "3", "N", "Pouze komentář"}
     assert hass.states.get("sensor.edookit_petr_novak_grade_average").attributes["subjects"]["Matematika"] == 3.0
+
+    # Subject now / next with start and end, end of school, arrival home (+15 min).
+    subject = hass.states.get("sensor.edookit_petr_novak_subject")
+    assert subject.state == "Český jazyk a literatura"
+    assert subject.attributes["state"] == "lesson"
+    assert subject.attributes["minutes_left"] == 40
+    assert hass.states.get("sensor.edookit_petr_novak_subject_start").state == "2026-10-01T06:55:00+00:00"
+    assert hass.states.get("sensor.edookit_petr_novak_subject_end").state == "2026-10-01T07:40:00+00:00"
+    assert hass.states.get("sensor.edookit_petr_novak_school_ends_today").state == "2026-10-01T11:30:00+00:00"
+    assert hass.states.get("sensor.edookit_petr_novak_arrival_home").state == "2026-10-01T11:45:00+00:00"
+    # Friday: lessons replaced by the trip 8:00-13:30, which still counts as a school day.
+    assert hass.states.get("sensor.edookit_petr_novak_next_school_day_end").state == "2026-10-02T11:30:00+00:00"
+    # Smart refresh: 5 minutes after the current lesson ends.
+    assert entry.runtime_data.smart.plan.when.isoformat() == "2026-10-01T09:45:00+02:00"
+
+    # In the break the sensor shows the next subject (9:44, just before the 9:45 refresh).
+    freezer.move_to("2026-10-01 09:44:00+02:00")
+    async_fire_time_changed(hass)
+    await hass.async_block_till_done()
+    subject = hass.states.get("sensor.edookit_petr_novak_subject")
+    assert subject.state == "Zeměpis"
+    assert (subject.attributes["state"], subject.attributes["minutes_until"]) == ("break", 16)
 
     # Written tests from the timetable ("Pís." badges) reach the sensor and the calendars.
     exams = hass.states.get("sensor.edookit_petr_novak_written_tests")

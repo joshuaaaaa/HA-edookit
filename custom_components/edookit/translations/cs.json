@@ -64,14 +64,24 @@
           "api_username": "Uživatel REST API školy (volitelné)",
           "api_password": "Heslo REST API školy (volitelné)",
           "api_student_id": "ID žáka pro REST API (volitelné)",
-          "oidc_client_id": "Plus4U OIDC client id (pokročilé)"
+          "oidc_client_id": "Plus4U OIDC client id (pokročilé)",
+          "smart_refresh": "Chytrá aktualizace (po každé hodině)",
+          "after_lesson_delay": "Aktualizovat po skončení hodiny za",
+          "off_school_interval": "Interval aktualizace mimo vyučování",
+          "quiet_start": "Neaktualizovat od",
+          "quiet_end": "Neaktualizovat do",
+          "travel_time": "Cesta ze školy domů"
         },
         "data_description": {
           "timetable_update_time": "Rozvrh se stáhne jednou denně v tento čas (a také při startu Home Assistanta nebo stiskem tlačítka Aktualizovat).",
-          "scan_interval": "Minuty. 0 = jen jednou denně spolu s rozvrhem.",
+          "scan_interval": "Minuty. Použije se jen při vypnuté chytré aktualizaci. 0 = jen jednou denně spolu s rozvrhem.",
           "timetable_source": "Automaticky: REST API pokud je nastavené, jinak iCal adresa pokud je vyplněná, jinak webová stránka portálu.",
           "ical_url": "Pokud škola poskytuje odkaz na kalendář (iCal/ICS) s rozvrhem, je to nejspolehlivější zdroj.",
-          "api_username": "Jen pokud vám škola dala přístup k REST API Edookitu (rodiče ho většinou nemají)."
+          "api_username": "Jen pokud vám škola dala přístup k REST API Edookitu (rodiče ho většinou nemají).",
+          "smart_refresh": "Během vyučování se zprávy, známky a úkoly stáhnou chvíli po konci každé hodiny; odpoledne, o víkendu a o prázdninách se použije delší interval níže; v noci se nestahuje nic. Když je vypnuto, použije se pevný interval výše.",
+          "after_lesson_delay": "Minuty po konci hodiny (učitelé zapisují známky a poznámky až po hodině).",
+          "off_school_interval": "Minuty mezi aktualizacemi, když děti nejsou ve škole.",
+          "travel_time": "Minuty – použije senzor „Příchod domů“."
         }
       }
     }
@@ -165,6 +175,21 @@
       },
       "last_update": {
         "name": "Poslední aktualizace"
+      },
+      "school_end_next": {
+        "name": "Konec dalšího školního dne"
+      },
+      "arrival_home": {
+        "name": "Příchod domů"
+      },
+      "subject": {
+        "name": "Předmět"
+      },
+      "subject_start": {
+        "name": "Začátek předmětu"
+      },
+      "subject_end": {
+        "name": "Konec předmětu"
       }
     },
     "binary_sensor": {
