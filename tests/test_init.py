@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import date, timedelta
 from unittest.mock import AsyncMock, patch
 
 from freezegun.api import FrozenDateTimeFactory
@@ -20,6 +20,7 @@ from pytest_homeassistant_custom_component.common import (
 from custom_components.edookit.api import EdookitAuthError
 from custom_components.edookit.const import DOMAIN, EVENT_NEW_ITEM
 from custom_components.edookit.diagnostics import async_get_config_entry_diagnostics
+from custom_components.edookit.sensor import week_grades
 
 from .conftest import load
 
@@ -125,6 +126,11 @@ async def test_setup_entities(hass: HomeAssistant, freezer: FrozenDateTimeFactor
     assert hass.states.get("sensor.edookit_jan_novak_last_message").state == "Třídní schůzky"
     assert hass.states.get("sensor.edookit_jan_novak_last_grade").state == "3"  # "Včera" is the newest
     assert float(hass.states.get("sensor.edookit_jan_novak_grade_average").state) == pytest.approx(2.08, 0.01)
+    week = hass.states.get("sensor.edookit_jan_novak_grades_this_week")
+    assert week.state == "1"
+    assert week.attributes["average"] == 3.0
+    assert week.attributes["grades"][0]["weekday"] == "Ne"
+    assert week.attributes["text"] == "Ne 27. 9. · Matematika: 3 (Desetinná čísla)"
     assert hass.states.get("sensor.edookit_jan_novak_school_events").state == "2"
     assert hass.states.get("sensor.edookit_jan_novak_requires_action").state == "2"
     assert float(hass.states.get("sensor.edookit_jan_novak_payments_due").state) == 1250.0
@@ -404,3 +410,15 @@ async def test_family_portal_two_children(hass: HomeAssistant, freezer: FrozenDa
     ]
     # Both children share one download of the timetable pages.
     assert len(timetable_requests) == 3
+
+
+def test_week_grades_window() -> None:
+    grades = [
+        {"subject": "M", "grade": "1", "value": 1.0, "date": "2026-10-07T00:00:00"},
+        {"subject": "ČJ", "grade": "2", "value": 2.0, "date": "2026-10-01T10:00:00"},
+        {"subject": "AJ", "grade": "4", "value": 4.0, "date": "2026-09-30T00:00:00"},
+        {"subject": "D", "grade": "N", "value": None, "date": None},
+    ]
+    week = week_grades(grades, date(2026, 10, 7))
+    assert [g["subject"] for g in week] == ["M", "ČJ"]
+    assert week[1]["days_ago"] == 6

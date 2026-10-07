@@ -146,6 +146,9 @@
       "last_grade": {
         "name": "Last grade"
       },
+      "week_grades": {
+        "name": "Grades this week"
+      },
       "grade_average": {
         "name": "Grade average"
       },

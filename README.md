@@ -98,6 +98,7 @@ Všechny volby karty jsou v [`edookit-timetable-card/README.md`](edookit-timetab
 Další příklady (úkoly, průměry, kalendář) najdete v [`examples/dashboard.yaml`](examples/dashboard.yaml).
 Karta s **celým textem poslední zprávy** a **seznamem nadcházejících písemek** (vestavěná karta Markdown):
 [`examples/card_zprava_pisemky.yaml`](examples/card_zprava_pisemky.yaml).
+Karta se **známkami za poslední týden**: [`examples/card_znamky_tyden.yaml`](examples/card_znamky_tyden.yaml).
 
 ## Entity
 
@@ -119,6 +120,7 @@ Názvy entit se tvoří z jazyka HA při přidání integrace (zde česky, žák
 | `sensor.…_posledni_zprava` | předmět zprávy | `from`, `preview`, `url`, `messages` |
 | `sensor.…_posledni_zprava_text` | začátek textu zprávy | `text` (**celý text**), `subject`, `from`, `time`, `attachments`, `url`, `notification` (hotový text pro Telegram / notifikaci) |
 | `sensor.…_posledni_znamka` | známka | `subject`, `topic`, `weight`, `grades` |
+| `sensor.…_znamky_za_tyden` | počet známek za posledních 7 dní | `grades` – známky od nejnovější (datum, den, předmět, téma, známka, váha, `days_ago`), `average` – vážený průměr za týden, `text` – seznam pro notifikaci |
 | `sensor.…_prumer_znamek` | průměr | `subjects` (vážený průměr po předmětech) |
 | `sensor.…_domaci_ukoly`, `…_pisemky`, `…_akce_skoly`, `…_vyzaduje_akci` | počet | `items`, `next` |
 | `sensor.…_nadchazejici_pisemky` | nejbližší písemka („Čt 8. 10. 10:55 · Matematika: Zlomky“) | `tests` – všechny nadcházející písemky **seřazené od nejbližší** (datum, den, čas, předmět, název, `days_until`), `text` – seznam pro notifikaci, `count` |

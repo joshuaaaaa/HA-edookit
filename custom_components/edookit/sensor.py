@@ -57,6 +57,7 @@ async def async_setup_entry(
             UpcomingTestsSensor(entry, child),
             LastGradeSensor(entry, child),
             GradeAverageSensor(entry, child),
+            WeekGradesSensor(entry, child),
             HomeworkSensor(entry, child),
             ExamsSensor(entry, child),
             EventsSensor(entry, child),
@@ -513,6 +514,73 @@ class GradeAverageSensor(_DataBase):
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         return {"subjects": self.data.get("averages", {})}
+
+
+def week_grades(grades: list[dict[str, Any]], today: date, days: int = 7) -> list[dict[str, Any]]:
+    """Grades from the last ``days`` days (today included), newest first."""
+    since = (today - timedelta(days=days - 1)).isoformat()
+    result = []
+    for grade in grades:
+        when = str(grade.get("date") or "")[:10]
+        if not when or when < since or when > today.isoformat():
+            continue
+        day = date.fromisoformat(when)
+        result.append(
+            {
+                "date": when,
+                "weekday": WEEKDAYS_SHORT[day.weekday()],
+                "days_ago": (today - day).days,
+                "subject": grade.get("subject") or "",
+                "topic": grade.get("topic") or "",
+                "grade": grade.get("grade") or "",
+                "value": grade.get("value"),
+                "weight": grade.get("weight"),
+            }
+        )
+    return sorted(result, key=lambda g: g["date"], reverse=True)
+
+
+def grade_line(grade: dict[str, Any]) -> str:
+    """'Čt 8. 10. · Matematika: 2 (Zlomky)'."""
+    day = date.fromisoformat(grade["date"])
+    line = f"{grade['weekday']} {day.day}. {day.month}. · {grade['subject'] or '?'}: {grade['grade']}"
+    return f"{line} ({grade['topic']})" if grade["topic"] else line
+
+
+class WeekGradesSensor(_DataBase):
+    """Grades from the last 7 days; state = their count."""
+
+    _attr_icon = "mdi:school-outline"
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _unrecorded_attributes = frozenset({"grades", "text"})
+
+    def __init__(self, entry: EdookitConfigEntry, child: ChildRuntime) -> None:
+        super().__init__(entry, child, "week_grades")
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        # The 7-day window moves at midnight.
+        self.async_on_remove(
+            async_track_time_change(self.hass, lambda _now: self.async_write_ha_state(), hour=0, minute=0, second=5)
+        )
+
+    def _grades(self) -> list[dict[str, Any]]:
+        return week_grades(self.data.get("grades", []), dt_util.now().date())
+
+    @property
+    def native_value(self) -> int:
+        return len(self._grades())
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        grades = self._grades()
+        weighted = [(g["value"], g["weight"] or 1.0) for g in grades if g["value"] is not None]
+        total = sum(w for _, w in weighted)
+        return {
+            "average": round(sum(v * w for v, w in weighted) / total, 2) if total else None,
+            "grades": grades,
+            "text": "\n".join(grade_line(g) for g in grades) or "Žádné známky za poslední týden",
+        }
 
 
 class _ListSensor(_DataBase):
