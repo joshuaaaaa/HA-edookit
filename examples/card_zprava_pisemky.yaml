@@ -6,36 +6,37 @@ cards:
   # ---------------------------------------------------------------- last message
   - type: markdown
     title: ✉️ Poslední zpráva
-    content: >
-      {% set e = 'sensor.edookit_laura_hruba_posledni_zprava_text' %}
-      {% if states(e) in ['unknown', 'unavailable', 'none'] %}
+    content: |
+      {%- set e = 'sensor.edookit_laura_hruba_posledni_zprava_text' -%}
+      {%- if states(e) in ['unknown', 'unavailable', 'none'] -%}
       Žádná zpráva
-      {% else %}
+      {%- else -%}
       **{{ state_attr(e, 'subject') }}**
 
       <font color="gray">{{ state_attr(e, 'from') }} · {{ state_attr(e, 'time') }}</font>
 
       {{ (state_attr(e, 'text') or states(e)) | replace('\n', '  \n') }}
+      {%- if state_attr(e, 'attachments') %}
 
-      {% if state_attr(e, 'attachments') %}
       📎 {{ state_attr(e, 'attachments') | join(', ') }}
-      {% endif %}
-      {% if state_attr(e, 'url') %}
+      {%- endif %}
+      {%- if state_attr(e, 'url') %}
+
       [Otevřít v Edookitu]({{ state_attr(e, 'url') }})
-      {% endif %}
-      {% endif %}
+      {%- endif %}
+      {%- endif %}
 
   # ---------------------------------------------------------------- upcoming tests
   - type: markdown
     title: 📝 Nadcházející písemky
-    content: >
-      {% set tests = state_attr('sensor.edookit_laura_hruba_nadchazejici_pisemky', 'tests') or [] %}
-      {% if tests | count == 0 %}
+    content: |
+      {%- set tests = state_attr('sensor.edookit_laura_hruba_nadchazejici_pisemky', 'tests') or [] -%}
+      {%- if tests | count == 0 -%}
       Žádné nadcházející písemky 🎉
-      {% else %}
+      {%- else -%}
       | Kdy | Předmět | Písemka |
       |:---|:---|:---|
-      {% for t in tests -%}
+      {%- for t in tests %}
       | {{ t.weekday }} {{ t.date[8:10] | int }}. {{ t.date[5:7] | int }}.{% if t.time %} {{ t.time }}{% endif %}{% if t.days_until == 0 %} **dnes**{% elif t.days_until == 1 %} **zítra**{% endif %} | {{ t.subject_short or t.subject }} | {{ t.title }} |
-      {% endfor %}
-      {% endif %}
+      {%- endfor %}
+      {%- endif %}
