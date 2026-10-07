@@ -96,6 +96,8 @@ entity: sensor.edookit_jan_novak_rozvrh
 
 Všechny volby karty jsou v [`edookit-timetable-card/README.md`](edookit-timetable-card/README.md).
 Další příklady (úkoly, průměry, kalendář) najdete v [`examples/dashboard.yaml`](examples/dashboard.yaml).
+Karta s **celým textem poslední zprávy** a **seznamem nadcházejících písemek** (vestavěná karta Markdown):
+[`examples/card_zprava_pisemky.yaml`](examples/card_zprava_pisemky.yaml).
 
 ## Entity
 
