@@ -1,0 +1,21 @@
+# Dashboard card: grades from the last 7 days (sensor "Známky za týden").
+# Uses only the built-in Markdown card (no custom card needed).
+# Replace "laura_hruba" with your child's entity name (e.g. "jakub_hruby").
+type: markdown
+title: 🎓 Známky za týden
+content: |
+  {%- set e = 'sensor.edookit_laura_hruba_znamky_za_tyden' -%}
+  {%- set grades = state_attr(e, 'grades') or [] -%}
+  {%- if grades | count == 0 -%}
+  Za poslední týden žádné známky
+  {%- else -%}
+  | Kdy | Předmět | Známka | Téma |
+  |:---|:---|:---:|:---|
+  {%- for g in grades %}
+  | {{ g.weekday }} {{ g.date[8:10] | int }}. {{ g.date[5:7] | int }}.{% if g.days_ago == 0 %} **dnes**{% elif g.days_ago == 1 %} **včera**{% endif %} | {{ g.subject }} | **{{ g.grade }}**{% if g.weight and g.weight != 1 %} <font color="gray">({{ g.weight }}×)</font>{% endif %} | {{ g.topic }} |
+  {%- endfor %}
+  {%- if state_attr(e, 'average') is not none %}
+
+  Průměr za týden: **{{ state_attr(e, 'average') }}**
+  {%- endif %}
+  {%- endif %}

@@ -146,6 +146,9 @@
       "last_grade": {
         "name": "Poslední známka"
       },
+      "week_grades": {
+        "name": "Známky za týden"
+      },
       "grade_average": {
         "name": "Průměr známek"
       },
