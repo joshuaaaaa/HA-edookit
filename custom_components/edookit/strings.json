@@ -190,6 +190,12 @@
       },
       "subject_end": {
         "name": "Subject end"
+      },
+      "last_message_text": {
+        "name": "Last message text"
+      },
+      "upcoming_tests": {
+        "name": "Upcoming tests"
       }
     },
     "binary_sensor": {

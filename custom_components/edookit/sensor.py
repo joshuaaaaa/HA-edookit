@@ -53,6 +53,8 @@ async def async_setup_entry(
             TimetableChangesSensor(entry, child),
             UnreadSensor(entry, child),
             MessagesSensor(entry, child),
+            LastMessageTextSensor(entry, child),
+            UpcomingTestsSensor(entry, child),
             LastGradeSensor(entry, child),
             GradeAverageSensor(entry, child),
             HomeworkSensor(entry, child),
@@ -558,17 +560,155 @@ class ExamsSensor(_ListSensor):
     @property
     def items(self) -> list[dict[str, Any]]:
         """Tests from the exams page plus the "Pís." badges in the timetable."""
-        today = dt_util.now().date().isoformat()
-        lessons = (self.child.timetable.data or {}).get("lessons", [])
-        items = list(self.data.get("exams", []))
-        known = {(str(e.get("date"))[:10], e.get("title")) for e in items}
-        for exam in timetable_exams(lessons):
-            if exam["date"][:10] >= today and (exam["date"][:10], exam["title"]) not in known:
-                items.append(exam)
-        return sorted(items, key=lambda e: str(e.get("date") or "9999"))
+        return upcoming_exams(self.child)
 
     def __init__(self, entry: EdookitConfigEntry, child: ChildRuntime) -> None:
         super().__init__(entry, child, "exams")
+
+
+WEEKDAYS_SHORT = ["Po", "Út", "St", "Čt", "Pá", "So", "Ne"]
+
+
+def upcoming_exams(child: ChildRuntime) -> list[dict[str, Any]]:
+    """Upcoming written tests of a child, nearest first (exams page + timetable badges)."""
+    now = dt_util.now()
+    today = now.date().isoformat()
+    lessons = (child.timetable.data or {}).get("lessons", [])
+    items = [dict(e) for e in (child.data.data or {}).get("exams", [])]
+    known = {(str(e.get("date"))[:10], e.get("title")) for e in items}
+    for exam in timetable_exams(lessons):
+        if (exam["date"][:10], exam["title"]) not in known:
+            items.append(exam)
+            known.add((exam["date"][:10], exam["title"]))
+    # Subject abbreviation from the timetable lesson of the same day/time.
+    shorts = {(ls["date"], ls.get("start")): ls.get("subject_short") for ls in lessons}
+    result = []
+    for exam in items:
+        when = str(exam.get("date") or "")
+        if not when or when[:10] < today:
+            continue
+        if len(when) > 10:
+            parsed = dt_util.parse_datetime(when)
+            if parsed is not None and parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=dt_util.get_default_time_zone())
+            # A test at 8:00 today is still listed until the end of its lesson.
+            end = dt_util.parse_datetime(str(exam.get("end") or "")) if exam.get("end") else None
+            if end is not None and end.tzinfo is None:
+                end = end.replace(tzinfo=dt_util.get_default_time_zone())
+            if (end or parsed) and (end or parsed) < now:
+                continue
+        day = date.fromisoformat(when[:10])
+        time_str = when[11:16] if len(when) > 10 and when[11:16] != "00:00" else None
+        result.append(
+            {
+                "date": day.isoformat(),
+                "weekday": WEEKDAYS_SHORT[day.weekday()],
+                "time": time_str,
+                "subject": exam.get("subject") or "",
+                "subject_short": shorts.get((day.isoformat(), time_str)),
+                "title": exam.get("title") or "",
+                "period": exam.get("period"),
+                "days_until": (day - now.date()).days,
+                "description": exam.get("description"),
+                "url": exam.get("url"),
+            }
+        )
+    return sorted(result, key=lambda e: (e["date"], e["time"] or "99:99"))
+
+
+def exam_line(exam: dict[str, Any]) -> str:
+    """'Čt 8. 10. 10:55 · Matematika: Geometrické značky'."""
+    day = date.fromisoformat(exam["date"])
+    when = f"{exam['weekday']} {day.day}. {day.month}." + (f" {exam['time']}" if exam["time"] else "")
+    subject = exam["subject"] or exam["subject_short"] or ""
+    return f"{when} · {subject}: {exam['title']}" if subject else f"{when} · {exam['title']}"
+
+
+class UpcomingTestsSensor(_DataBase):
+    """All upcoming written tests sorted from the nearest; state = the nearest one."""
+
+    _attr_icon = "mdi:calendar-check-outline"
+    _unrecorded_attributes = frozenset({"tests", "text"})
+
+    def __init__(self, entry: EdookitConfigEntry, child: ChildRuntime) -> None:
+        super().__init__(entry, child, "upcoming_tests")
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        # Tests also come from the timetable, and "days_until" changes at midnight.
+        self.async_on_remove(self.child.timetable.async_add_listener(self.async_write_ha_state))
+        self.async_on_remove(
+            async_track_time_change(self.hass, lambda _now: self.async_write_ha_state(), hour=0, minute=0, second=5)
+        )
+
+    @property
+    def native_value(self) -> str | None:
+        tests = upcoming_exams(self.child)
+        return exam_line(tests[0])[:255] if tests else "Žádné písemky"
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        tests = upcoming_exams(self.child)
+        return {
+            "count": len(tests),
+            "next_date": tests[0]["date"] if tests else None,
+            "next_days_until": tests[0]["days_until"] if tests else None,
+            "tests": tests,
+            "text": "\n".join(exam_line(t) for t in tests) or "Žádné nadcházející písemky",
+        }
+
+
+class LastMessageTextSensor(_DataBase):
+    """The newest message with its full text (for Telegram / push notifications)."""
+
+    _attr_icon = "mdi:email-open-outline"
+    _unrecorded_attributes = frozenset({"text", "notification"})
+
+    def __init__(self, entry: EdookitConfigEntry, child: ChildRuntime) -> None:
+        super().__init__(entry, child, "last_message_text")
+
+    @property
+    def message(self) -> dict[str, Any]:
+        return self.data.get("latest_message") or {}
+
+    @property
+    def native_value(self) -> str | None:
+        msg = self.message
+        if not msg:
+            return None
+        text = msg.get("text") or msg.get("description") or msg.get("title") or ""
+        return " ".join(text.split())[:255] or None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        msg = self.message
+        if not msg:
+            return {}
+        text = msg.get("text") or msg.get("description") or ""
+        sender = msg.get("creator") or msg.get("from") or ""
+        title = msg.get("title") or msg.get("subject") or ""
+        attachments = [a["name"] for a in msg.get("attachments", [])]
+        lines = [f"✉️ {title}"]
+        if sender or msg.get("time"):
+            lines.append(" · ".join(x for x in (sender, msg.get("time")) if x))
+        if text:
+            lines += ["", text]
+        if attachments:
+            lines += ["", "📎 " + ", ".join(attachments)]
+        if msg.get("url"):
+            lines += ["", self._url(msg["url"]) or ""]
+        return {
+            "subject": title,
+            "from": sender,
+            "time": msg.get("time"),
+            "timestamp": msg.get("timestamp"),
+            "unread": msg.get("unread"),
+            "text": text,
+            "attachments": attachments,
+            "url": self._url(msg.get("url")),
+            "full_text_loaded": bool(msg.get("text")),
+            "notification": "\n".join(lines),
+        }
 
 
 class EventsSensor(_ListSensor):

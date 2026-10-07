@@ -190,6 +190,12 @@
       },
       "subject_end": {
         "name": "Konec předmětu"
+      },
+      "last_message_text": {
+        "name": "Poslední zpráva – text"
+      },
+      "upcoming_tests": {
+        "name": "Nadcházející písemky"
       }
     },
     "binary_sensor": {

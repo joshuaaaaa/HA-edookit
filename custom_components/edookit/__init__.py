@@ -277,9 +277,14 @@ def _register_services(hass: HomeAssistant) -> None:
                 base / "children.json",
                 json.dumps([c.__dict__ for c in children], ensure_ascii=False, indent=2),
             )
-            for child in children:
+            for rt in entry.runtime_data.children:
+                child = rt.child
+                pages = {**PAGES, "timetable": "/timetable/"}
+                latest = (rt.data.data or {}).get("latest_message") or {}
+                if str(latest.get("url") or "").startswith("/"):
+                    pages["message"] = latest["url"]
                 async with client.as_child(child):
-                    for key, path in {**PAGES, "timetable": "/timetable/"}.items():
+                    for key, path in pages.items():
                         try:
                             html = await client.async_get_page(path)
                         except Exception as err:

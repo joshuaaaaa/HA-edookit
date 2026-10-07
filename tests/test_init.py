@@ -25,6 +25,7 @@ from .conftest import load
 
 PAGES = {
     "/": "dashboard.html",
+    "/messages/detail?message=123": "message_detail.html",
     "/overview/updates": "inbox.html",
     "/evaluation/listing": "evaluation_list.html",
     "/timetable/upcoming": "upcoming.html",
@@ -128,6 +129,16 @@ async def test_setup_entities(hass: HomeAssistant, freezer: FrozenDateTimeFactor
     assert hass.states.get("sensor.edookit_jan_novak_requires_action").state == "2"
     assert float(hass.states.get("sensor.edookit_jan_novak_payments_due").state) == 1250.0
 
+    full = hass.states.get("sensor.edookit_jan_novak_last_message_text")
+    assert full.state.startswith("Vážení rodiče, zveme vás na třídní schůzky")
+    assert full.attributes["subject"] == "Třídní schůzky"
+    assert full.attributes["text"].count("\n") == 2
+    assert full.attributes["attachments"] == ["pozvanka.pdf"]
+    assert full.attributes["notification"].startswith(
+        "✉️ Třídní schůzky\nMgr. Petra Svobodová · Dnes, 8:15\n\nVážení rodiče,"
+    )
+    assert full.attributes["notification"].endswith("https://skola.edookit.net/messages/detail?message=123")
+
     cal = hass.states.get("calendar.edookit_jan_novak_timetable")
     assert cal.attributes["message"] == "M"
 
@@ -171,6 +182,7 @@ async def test_new_item_event(hass: HomeAssistant, freezer: FrozenDateTimeFactor
     await entry.runtime_data.children[0].data.async_refresh()
     await hass.async_block_till_done()
     assert len(events) == 1
+    assert events[0].data["text"] == ""  # no detail page for this exam in the test portal
     assert events[0].data["type"] == "exam"
     assert events[0].data["title"] == "Písemka z matematiky"
     assert events[0].data["url"] == "https://skola.edookit.net/exams/detail?exam=5"
@@ -361,6 +373,13 @@ async def test_family_portal_two_children(hass: HomeAssistant, freezer: FrozenDa
     subject = hass.states.get("sensor.edookit_petr_novak_subject")
     assert subject.state == "Zeměpis"
     assert (subject.attributes["state"], subject.attributes["minutes_until"]) == ("break", 16)
+
+    # Upcoming tests sorted from the nearest; the 30. 9. ones are over.
+    tests = hass.states.get("sensor.edookit_petr_novak_upcoming_tests")
+    assert tests.state == "Čt 1. 10. 10:55 · Seminář matematiky: Geometrické značky"
+    assert tests.attributes["count"] == 1
+    assert tests.attributes["tests"][0]["days_until"] == 0
+    assert tests.attributes["tests"][0]["subject_short"] == "SM"
 
     # Written tests from the timetable ("Pís." badges) reach the sensor and the calendars.
     exams = hass.states.get("sensor.edookit_petr_novak_written_tests")

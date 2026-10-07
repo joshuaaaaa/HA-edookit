@@ -60,3 +60,58 @@
     - action: notify.mobile_app_telefon
       data:
         message: "Jan dorazí domů kolem {{ as_timestamp(states('sensor.edookit_jan_novak_prichod_domu')) | timestamp_custom('%H:%M') }}"
+
+# ---------------------------------------------------------------- Telegram
+# Requires the Telegram bot integration (telegram_bot) set up in Home Assistant.
+
+# Every new Edookit message with its full text (event fired by the integration).
+- alias: "Edookit – nová zpráva na Telegram"
+  triggers:
+    - trigger: event
+      event_type: edookit_new_item
+      event_data:
+        type: inboxMessage
+  actions:
+    - action: telegram_bot.send_message
+      data:
+        parse_mode: plain_text
+        title: "✉️ {{ trigger.event.data.title }}"
+        message: >-
+          {{ trigger.event.data.student }} · {{ trigger.event.data.creator }} · {{ trigger.event.data.time }}
+
+          {{ trigger.event.data.text }}
+          {% if trigger.event.data.attachments %}
+
+          📎 {{ trigger.event.data.attachments | join(', ') }}{% endif %}
+
+          {{ trigger.event.data.url }}
+
+# Alternative: send the ready-made text of the "Poslední zpráva – text" sensor when it changes.
+- alias: "Edookit – poslední zpráva (senzor) na Telegram"
+  triggers:
+    - trigger: state
+      entity_id: sensor.edookit_laura_hruba_posledni_zprava_text
+      attribute: url
+  conditions:
+    - condition: template
+      value_template: "{{ trigger.from_state is not none and trigger.to_state.attributes.url is not none }}"
+  actions:
+    - action: telegram_bot.send_message
+      data:
+        parse_mode: plain_text
+        message: "{{ state_attr('sensor.edookit_laura_hruba_posledni_zprava_text', 'notification') }}"
+
+# Sunday evening: list of upcoming written tests, nearest first.
+- alias: "Edookit – písemky na příští týden"
+  triggers:
+    - trigger: time
+      at: "18:00:00"
+  conditions:
+    - condition: time
+      weekday: [sun]
+  actions:
+    - action: telegram_bot.send_message
+      data:
+        parse_mode: plain_text
+        title: "📝 Nadcházející písemky – Laura"
+        message: "{{ state_attr('sensor.edookit_laura_hruba_nadchazejici_pisemky', 'text') }}"

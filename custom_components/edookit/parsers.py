@@ -1259,3 +1259,38 @@ def parse_dashboard_children(html: str | BeautifulSoup, today: date | None = Non
             }
         )
     return result
+
+
+def parse_message_detail(html: str | BeautifulSoup) -> dict[str, Any]:
+    """Full text of a message / inbox item detail page.
+
+    Uses the portal's label/value rows (see :func:`parse_detail_page`); when the
+    page has no rich text block, falls back to the main content area.
+    """
+    soup = soupify(html)
+    fields = parse_detail_page(soup)
+    text = fields.get("description") or ""
+    if not text:
+        main = soup.select_one(".rich_content, .message-body, .message-text, .ql-editor")
+        if main is None:
+            main = soup.select_one("#content .content, #content, section.content")
+        if main is not None:
+            for junk in main.select("script, style, form, nav, .submenu, .flash, .files_table, h1, h2"):
+                junk.decompose()
+            lines = [clean(line) for line in main.get_text("\n").split("\n")]
+            text = "\n".join(line for line in lines if line)
+    sender = next(
+        (
+            v
+            for k, v in fields.items()
+            if isinstance(v, str) and re.match(r"(?i)(od|odesílatel|from|autor|vytvořil)", k)
+        ),
+        None,
+    )
+    return {
+        "subject": fields.get("name"),
+        "text": text.strip(),
+        "from": sender,
+        "attachments": fields.get("attachments", []),
+        "fields": {k: v for k, v in fields.items() if k not in ("description", "attachments", "name")},
+    }

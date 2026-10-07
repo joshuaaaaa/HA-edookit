@@ -115,9 +115,11 @@ Názvy entit se tvoří z jazyka HA při přidání integrace (zde česky, žák
 | `sensor.…_zmeny_v_rozvrhu` | počet | `changes` |
 | `sensor.…_neprectene` | počet | `items` |
 | `sensor.…_posledni_zprava` | předmět zprávy | `from`, `preview`, `url`, `messages` |
+| `sensor.…_posledni_zprava_text` | začátek textu zprávy | `text` (**celý text**), `subject`, `from`, `time`, `attachments`, `url`, `notification` (hotový text pro Telegram / notifikaci) |
 | `sensor.…_posledni_znamka` | známka | `subject`, `topic`, `weight`, `grades` |
 | `sensor.…_prumer_znamek` | průměr | `subjects` (vážený průměr po předmětech) |
 | `sensor.…_domaci_ukoly`, `…_pisemky`, `…_akce_skoly`, `…_vyzaduje_akci` | počet | `items`, `next` |
+| `sensor.…_nadchazejici_pisemky` | nejbližší písemka („Čt 8. 10. 10:55 · Matematika: Zlomky“) | `tests` – všechny nadcházející písemky **seřazené od nejbližší** (datum, den, čas, předmět, název, `days_until`), `text` – seznam pro notifikaci, `count` |
 | `sensor.…_absence` | počet záznamů | `unexcused`, `records`, `stats` |
 | `sensor.…_platby_k_uhrade` | Kč | `unpaid` |
 | `sensor.…_posledni_aktualizace` (diagnostika) | čas | `errors` – co se nepodařilo načíst, `next_refresh` – kdy proběhne další chytrá aktualizace |
@@ -141,7 +143,11 @@ data:
   student: Jan Novák
 ```
 
+Událost obsahuje i `text` – **celý text** zprávy (integrace si otevře její detail) a `attachments`.
 Při prvním načtení se nic neohlašuje (aby nepřišlo 50 notifikací najednou).
+
+Příklady pro **Telegram** (nová zpráva s celým textem, seznam písemek v neděli večer) jsou v
+[`examples/automations.yaml`](examples/automations.yaml).
 
 * **Blueprint** pro notifikace do mobilu:
   [![Import blueprintu](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2Fjoshuaaaaa%2FHA-edookit%2Fblob%2Fmain%2Fblueprints%2Fautomation%2Fedookit%2Fedookit_notify.yaml)

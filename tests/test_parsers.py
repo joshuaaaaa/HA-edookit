@@ -237,3 +237,20 @@ def test_family_dashboard_states_and_exams():
     # Short name as shown in the portal box, teacher abbreviation for the box corner
     assert by_key[("2026-09-29", 3)]["subject_short"] == "Tv"
     assert by_key[("2026-09-29", 1)]["teacher_short"] == "Še"
+
+
+def test_message_detail():
+    detail = parsers.parse_message_detail(load("message_detail.html"))
+    assert detail["subject"] == "Třídní schůzky"
+    assert detail["from"] == "Mgr. Petra Svobodová"
+    assert detail["text"].splitlines() == [
+        "Vážení rodiče,",
+        "zveme vás na třídní schůzky ve čtvrtek 8. 10. od 17:00 ve třídě 6.B.",
+        "S pozdravem P. Svobodová",
+    ]
+    assert detail["attachments"] == [{"name": "pozvanka.pdf", "url": "/files/download?id=5"}]
+
+
+def test_message_detail_fallback_without_rich_text():
+    html = '<html><body><div id="content"><h2>Zpráva</h2><p>První řádek</p><p>Druhý řádek</p></div></body></html>'
+    assert parsers.parse_message_detail(html)["text"] == "První řádek\nDruhý řádek"

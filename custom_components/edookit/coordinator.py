@@ -45,6 +45,8 @@ from .ical import ical_to_lessons, parse_ical
 _LOGGER = logging.getLogger(__name__)
 
 SEEN_RETENTION = timedelta(days=120)
+# New items whose detail page is opened so events carry the full text.
+FULL_TEXT_TYPES = ("inboxMessage", "event", "assignment", "exam", "poll", "actionRequired")
 
 
 @dataclass
@@ -453,6 +455,8 @@ class EdookitDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         data["inbox"] = inbox
         data["unread"] = sum(1 for i in inbox if i["unread"])
         data["messages"] = [i for i in inbox if i["type"] == "inboxMessage"]
+        latest = data["messages"][0] if data["messages"] else None
+        data["latest_message"] = {**latest, **await self._detail(latest)} if latest else None
 
         widget_grades = (student_widgets or {}).get("grades") or []
         subjects = (student_widgets or {}).get("subjects") or {}
@@ -511,7 +515,7 @@ class EdookitDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         data["updated"] = dt_util.now().isoformat()
 
         if _opt(entry, CONF_FIRE_EVENTS, DEFAULT_FIRE_EVENTS):
-            self._fire_new_items(inbox)
+            await self._fire_new_items(inbox)
         await _save(self._store, self._stored, self.client)
         return data
 
@@ -537,7 +541,28 @@ class EdookitDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         except EdookitError as err:
             errors["substitutions"] = str(err)
 
-    def _fire_new_items(self, inbox: list[dict[str, Any]]) -> None:
+    async def _detail(self, item: dict[str, Any] | None) -> dict[str, Any]:
+        """Full text of an inbox item (cached; the list only has a preview)."""
+        url = (item or {}).get("url")
+        if not url or not url.startswith("/"):
+            return {}
+        cache: dict[str, Any] = self._stored.setdefault("details", {})
+        if url in cache:
+            return cache[url]
+        try:
+            detail = parsers.parse_message_detail(await self.client.async_get_page(url))
+        except EdookitError as err:
+            _LOGGER.debug("Could not load %s: %s", url, err)
+            return {}
+        except Exception:
+            _LOGGER.debug("Could not parse %s", url, exc_info=True)
+            return {}
+        cache[url] = detail
+        for old_url in list(cache)[:-30]:  # keep the cache small
+            cache.pop(old_url)
+        return detail
+
+    async def _fire_new_items(self, inbox: list[dict[str, Any]]) -> None:
         # One "seen" ledger per account: an item shown for both children is announced once.
         seen: dict[str, str] = self._stored.setdefault("seen", {})
         seeded: list[str] = self._stored.setdefault("seeded", [""] if seen else [])
@@ -552,6 +577,7 @@ class EdookitDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             seen[identity] = now.isoformat()
             if first_run:
                 continue
+            detail = await self._detail(item) if item["type"] in FULL_TEXT_TYPES else {}
             self.hass.bus.async_fire(
                 EVENT_NEW_ITEM,
                 {
@@ -565,6 +591,8 @@ class EdookitDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     "time": item["time"],
                     "grade": item["grade"],
                     "description": item["description"],
+                    "text": detail.get("text") or item["description"],
+                    "attachments": [a["name"] for a in detail.get("attachments", [])],
                     "url": f"{self.client.base_url}{item['url']}"
                     if item.get("url", "") and item["url"].startswith("/")
                     else item.get("url"),
