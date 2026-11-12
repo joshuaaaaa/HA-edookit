@@ -105,6 +105,120 @@ Karta s **celým textem poslední zprávy** a **seznamem nadcházejících píse
 [`examples/card_zprava_pisemky.yaml`](examples/card_zprava_pisemky.yaml).
 Karta se **známkami za poslední týden**: [`examples/card_znamky_tyden.yaml`](examples/card_znamky_tyden.yaml).
 
+### Příklad stránky: písemky a známky
+
+Mřížka se seznamem nadcházejících písemek a známkami za týden (pro dvě děti – `xxx` nahraďte
+jménem žáka v názvu entity, např. `jan_novak`):
+
+![Příklad stránky s písemkami a známkami](docs/dashboard-pisemky-znamky.png)
+
+```yaml
+type: grid
+cards:
+  - type: markdown
+    title: 📝 Nadcházející písemky
+    content: >
+      {%- set tests =
+      state_attr('sensor.edookit_xxx_nadchazejici_pisemky', 'tests') or
+      [] -%}
+
+      {%- if tests | count == 0 -%}
+
+      Žádné nadcházející písemky 🎉
+
+      {%- else -%}
+
+      | Kdy | Předmět | Písemka |
+
+      |:---|:---|:---|
+
+      {%- for t in tests %}
+
+      | {{ t.weekday }} {{ t.date[8:10] | int }}. {{ t.date[5:7] | int }}.{% if
+      t.time %} {{ t.time }}{% endif %}{% if t.days_until == 0 %} **dnes**{%
+      elif t.days_until == 1 %} **zítra**{% endif %} | {{ t.subject_short or
+      t.subject }} | {{ t.title }} |
+
+      {%- endfor %}
+
+      {%- endif %}
+  - type: markdown
+    title: 🎓 Známky za týden xxx
+    content: >
+      {%- set e = 'sensor.edookit_xxx_znamky_za_tyden' -%}
+
+      {%- set grades = state_attr(e, 'grades') or [] -%}
+
+      {%- if grades | count == 0 -%}
+
+      Za poslední týden žádné známky
+
+      {%- else -%}
+
+      | Kdy | Předmět | Známka | Téma |
+
+      |:---|:---|:---:|:---|
+
+      {%- for g in grades %}
+
+      | {{ g.weekday }} {{ g.date[8:10] | int }}. {{ g.date[5:7] | int }}.{% if
+      g.days_ago == 0 %} **dnes**{% elif g.days_ago == 1 %} **včera**{% endif %}
+      | {{ g.subject }} | **{{ g.grade }}**{% if g.weight and g.weight != 1 %}
+      <font color="gray">({{ g.weight }}×)</font>{% endif %} | {{ g.topic }} |
+
+      {%- endfor %}
+
+      {%- if state_attr(e, 'average') is not none %}
+
+
+      Průměr za týden: **{{ state_attr(e, 'average') }}**
+
+      {%- endif %}
+
+      {%- endif %}
+    grid_options:
+      columns: 15
+      rows: auto
+  - type: markdown
+    title: 🎓 Známky za týden xxx
+    content: >
+      {%- set e = 'sensor.edookit_xxx_znamky_za_tyden' -%}
+
+      {%- set grades = state_attr(e, 'grades') or [] -%}
+
+      {%- if grades | count == 0 -%}
+
+      Za poslední týden žádné známky
+
+      {%- else -%}
+
+      | Kdy | Předmět | Známka | Téma |
+
+      |:---|:---|:---:|:---|
+
+      {%- for g in grades %}
+
+      | {{ g.weekday }} {{ g.date[8:10] | int }}. {{ g.date[5:7] | int }}.{% if
+      g.days_ago == 0 %} **dnes**{% elif g.days_ago == 1 %} **včera**{% endif %}
+      | {{ g.subject }} | **{{ g.grade }}**{% if g.weight and g.weight != 1 %}
+      <font color="gray">({{ g.weight }}×)</font>{% endif %} | {{ g.topic }} |
+
+      {%- endfor %}
+
+      {%- if state_attr(e, 'average') is not none %}
+
+
+      Průměr za týden: **{{ state_attr(e, 'average') }}**
+
+      {%- endif %}
+
+      {%- endif %}
+    grid_options:
+      columns: 15
+      rows: auto
+column_span: 4
+```
+
 ## Entity
 
 Názvy entit se tvoří z jazyka HA při přidání integrace (zde česky, žák „Jan Novák“):
