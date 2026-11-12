@@ -107,7 +107,7 @@ Karta se **známkami za poslední týden**: [`examples/card_znamky_tyden.yaml`](
 
 ### Příklad stránky: písemky a známky
 
-Mřížka se seznamem nadcházejících písemek a známkami za týden (pro dvě děti – `xxx` nahraďte
+Mřížka se seznamem nadcházejících písemek, známkami za týden a celým textem poslední zprávy (pro dvě děti – `xxx` nahraďte
 jménem žáka v názvu entity, např. `jan_novak`):
 
 ![Příklad stránky s písemkami a známkami](docs/dashboard-pisemky-znamky.png)
@@ -215,6 +215,44 @@ cards:
       {%- endif %}
     grid_options:
       columns: 15
+      rows: auto
+  - type: markdown
+    title: ✉️ Poslední zpráva
+    content: >
+      {%- set e = 'sensor.edookit_xxx_posledni_zprava_text' -%}
+
+      {%- if states(e) in ['unknown', 'unavailable', 'none'] -%}
+
+      Žádná zpráva
+
+      {%- else -%}
+
+      **{{ state_attr(e, 'subject') }}**
+
+
+      <font color="gray">{{ state_attr(e, 'from') }} · {{ state_attr(e, 'time')
+      }}</font>
+
+
+      {{ (state_attr(e, 'text') or states(e)) | replace('\n', '  \n') }}
+
+      {%- if state_attr(e, 'attachments') %}
+
+
+      📎 {{ state_attr(e, 'attachments') | join(', ') }}
+
+      {%- endif %}
+
+      {%- if state_attr(e, 'url') %}
+
+
+      [Otevřít v Edookitu]({{ state_attr(e, 'url') }})
+
+      {%- endif %}
+
+      {%- endif %}
+    grid_options:
+      columns: 24
       rows: auto
 column_span: 4
 ```
