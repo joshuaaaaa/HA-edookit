@@ -12,7 +12,7 @@
           "oidc_client_id": "Plus4U OIDC client id (advanced)"
         },
         "data_description": {
-          "school": "Subdomain or address of your school's portal, e.g. `zs-example` or `https://zs-example.edookit.net`.",
+          "school": "Subdomain or address of your school's portal, e.g. `zs-priklad` or `{example_url}`.",
           "login_method": "Automatic: e-mail → Plus4U password, anything else → Plus4U access codes; the classic Edookit form if the school has one.",
           "oidc_client_id": "Leave empty. Only needed if automatic Plus4U discovery fails (see README).",
           "username": "For “+4U Access” login enter access code 1 here and access code 2 as the password."

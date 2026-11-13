@@ -12,7 +12,7 @@
           "oidc_client_id": "Plus4U OIDC client id (pokročilé)"
         },
         "data_description": {
-          "school": "Subdoména nebo adresa portálu školy, např. `zs-priklad` nebo `https://zs-priklad.edookit.net`.",
+          "school": "Subdoména nebo adresa portálu školy, např. `zs-priklad` nebo `{example_url}`.",
           "login_method": "Automaticky: e-mail → heslo Plus4U, cokoli jiného → přístupové kódy Plus4U; klasický formulář Edookitu, pokud ho škola má.",
           "oidc_client_id": "Nechte prázdné. Potřeba jen když selže automatické zjištění Plus4U (viz README).",
           "username": "Pro přihlášení „+4U Access“ sem zadejte přístupový kód 1 a do hesla přístupový kód 2."
