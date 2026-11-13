@@ -146,7 +146,12 @@ class EdookitConfigFlow(ConfigFlow, domain=DOMAIN):
                     title=info["student"] or f"{info['school']} ({user_input[CONF_USERNAME]})",
                     data={**user_input, CONF_SCHOOL: info["school"]},
                 )
-        return self.async_show_form(step_id="user", data_schema=_user_schema(user_input or {}), errors=errors)
+        return self.async_show_form(
+            step_id="user",
+            data_schema=_user_schema(user_input or {}),
+            errors=errors,
+            description_placeholders={"example_url": "https://zs-priklad.edookit.net"},
+        )
 
     async def async_step_reauth(self, entry_data: Mapping[str, Any]) -> ConfigFlowResult:
         """Password changed or session refused."""
